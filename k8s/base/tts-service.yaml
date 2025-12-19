@@ -1,0 +1,106 @@
+---
+# TTS Service - Riva Speech Synthesis
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tts-service-config
+  namespace: voice-workflow
+data:
+  TTS_SERVICE_NAME: "tts-service"
+  TTS_SERVICE_HOST: "0.0.0.0"
+  TTS_HTTP_PORT: "8003"
+  TTS_SERVICE_PORT: "50053"
+  TTS_RIVA_SERVER_URL: "riva-server:50051"
+  TTS_TTS_LANGUAGE_CODE: "hi-IN"
+  TTS_TTS_SAMPLE_RATE: "22050"
+  TTS_GRPC_POOL_SIZE: "10"
+  TTS_STREAMING_CHUNK_SIZE: "4096"
+  TTS_OTLP_ENDPOINT: "http://otel-collector:4317"
+  TTS_ENABLE_TRACING: "true"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tts-service
+  namespace: voice-workflow
+  labels:
+    app: tts-service
+    app.kubernetes.io/name: tts-service
+    app.kubernetes.io/component: tts
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: tts-service
+  template:
+    metadata:
+      labels:
+        app: tts-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8003"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: tts-service
+          image: tts-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8003
+              name: http
+            - containerPort: 50053
+              name: grpc
+          envFrom:
+            - configMapRef:
+                name: tts-service-config
+          resources:
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8003
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8003
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - tts-service
+                topologyKey: kubernetes.io/hostname
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tts-service
+  namespace: voice-workflow
+  labels:
+    app: tts-service
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8003
+      targetPort: 8003
+      name: http
+    - port: 50053
+      targetPort: 50053
+      name: grpc
+  selector:
+    app: tts-service
+

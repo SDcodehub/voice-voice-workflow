@@ -1,0 +1,104 @@
+%%{init: {'theme': 'dark', 'themeVariables': { 'primaryColor': '#76B900', 'primaryTextColor': '#fff', 'primaryBorderColor': '#76B900', 'lineColor': '#76B900', 'secondaryColor': '#1a1a2e', 'tertiaryColor': '#16213e'}}}%%
+
+flowchart TB
+    subgraph clients["🎤 Clients"]
+        browser["Browser App"]
+        mobile["Mobile App"]
+        iot["IoT Device"]
+    end
+
+    subgraph ingress["🌐 Ingress Layer"]
+        nginx["NGINX Ingress<br/>WebSocket + gRPC-Web"]
+    end
+
+    subgraph gateway["🔀 Voice Gateway"]
+        ws["WebSocket Handler"]
+        session["Session Manager"]
+        orchestrator["Pipeline Orchestrator"]
+    end
+
+    subgraph asr_layer["🎙️ ASR Layer"]
+        asr_svc["ASR Service<br/>(gRPC Client)"]
+        asr_pool["Connection Pool"]
+    end
+
+    subgraph llm_layer["🧠 LLM Layer"]
+        llm_svc["LLM Service<br/>(Inference Client)"]
+        llm_cache["Response Cache"]
+    end
+
+    subgraph tts_layer["🔊 TTS Layer"]
+        tts_svc["TTS Service<br/>(gRPC Client)"]
+        tts_pool["Connection Pool"]
+    end
+
+    subgraph gpu_inference["⚡ GPU Inference (NVIDIA)"]
+        subgraph riva["NVIDIA Riva Server"]
+            riva_asr["ASR Model<br/>hi-IN Conformer"]
+            riva_tts["TTS Model<br/>hi-IN FastPitch"]
+        end
+        
+        subgraph nim["NVIDIA NIM / vLLM"]
+            llm_model["LLM Model<br/>Llama-3.1-8B"]
+        end
+    end
+
+    subgraph support["📊 Supporting Services"]
+        redis["Redis<br/>(Sessions + Cache)"]
+        prometheus["Prometheus"]
+        grafana["Grafana"]
+        otel["OpenTelemetry"]
+    end
+
+    %% Client connections
+    browser --> nginx
+    mobile --> nginx
+    iot --> nginx
+
+    %% Gateway flow
+    nginx --> ws
+    ws --> session
+    session --> orchestrator
+
+    %% ASR flow
+    orchestrator -->|"1. Audio Stream"| asr_svc
+    asr_svc --> asr_pool
+    asr_pool -->|"gRPC Streaming"| riva_asr
+    riva_asr -->|"Text Transcript"| asr_svc
+
+    %% LLM flow
+    asr_svc -->|"2. Hindi Text"| llm_svc
+    llm_svc --> llm_cache
+    llm_svc -->|"Streaming Inference"| llm_model
+    llm_model -->|"Response Tokens"| llm_svc
+
+    %% TTS flow
+    llm_svc -->|"3. Response Text"| tts_svc
+    tts_svc --> tts_pool
+    tts_pool -->|"gRPC Streaming"| riva_tts
+    riva_tts -->|"Audio Chunks"| tts_svc
+
+    %% Return to client
+    tts_svc -->|"4. Audio Response"| orchestrator
+    orchestrator --> ws
+
+    %% Support services
+    session --> redis
+    llm_cache --> redis
+    asr_svc --> otel
+    llm_svc --> otel
+    tts_svc --> otel
+    otel --> prometheus
+    prometheus --> grafana
+
+    %% Styling
+    classDef nvidia fill:#76B900,stroke:#333,stroke-width:2px,color:#000
+    classDef service fill:#1a1a2e,stroke:#76B900,stroke-width:2px,color:#fff
+    classDef client fill:#16213e,stroke:#e94560,stroke-width:2px,color:#fff
+    classDef support fill:#0f3460,stroke:#00d9ff,stroke-width:2px,color:#fff
+
+    class riva_asr,riva_tts,llm_model nvidia
+    class asr_svc,llm_svc,tts_svc,ws,session,orchestrator service
+    class browser,mobile,iot client
+    class redis,prometheus,grafana,otel support
+

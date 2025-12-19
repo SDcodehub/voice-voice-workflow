@@ -1,0 +1,273 @@
+// Voice Service Protocol Buffer Definitions
+// For gRPC communication between services
+
+syntax = "proto3";
+
+package voice.v1;
+
+option go_package = "voice-workflow/proto/voice/v1";
+
+// ============================================================================
+// Voice Gateway Service
+// ============================================================================
+
+service VoiceGatewayService {
+  // Start a new voice session
+  rpc StartSession(StartSessionRequest) returns (StartSessionResponse);
+  
+  // Stream audio for processing
+  rpc ProcessAudioStream(stream AudioChunk) returns (stream ProcessingResponse);
+  
+  // End a voice session
+  rpc EndSession(EndSessionRequest) returns (EndSessionResponse);
+  
+  // Get session status
+  rpc GetSessionStatus(GetSessionStatusRequest) returns (SessionStatus);
+}
+
+message StartSessionRequest {
+  string language_code = 1;  // e.g., "hi-IN", "en-US"
+  SessionConfig config = 2;
+}
+
+message SessionConfig {
+  int32 sample_rate = 1;           // Audio sample rate (default: 16000)
+  string audio_encoding = 2;        // Audio encoding (default: LINEAR_PCM)
+  int32 max_history_turns = 3;      // Max conversation history
+  bool enable_interim_results = 4;  // Enable interim ASR results
+}
+
+message StartSessionResponse {
+  string session_id = 1;
+  string language_code = 2;
+  SessionStatus status = 3;
+}
+
+message AudioChunk {
+  string session_id = 1;
+  bytes audio_data = 2;
+  bool is_final = 3;  // True if this is the last chunk
+}
+
+message ProcessingResponse {
+  oneof response {
+    ASRResult asr_result = 1;
+    LLMResponse llm_response = 2;
+    TTSAudio tts_audio = 3;
+    StatusUpdate status_update = 4;
+    ErrorResponse error = 5;
+  }
+}
+
+message ASRResult {
+  string transcript = 1;
+  bool is_final = 2;
+  float confidence = 3;
+  repeated WordInfo words = 4;
+}
+
+message WordInfo {
+  string word = 1;
+  float start_time = 2;
+  float end_time = 3;
+  float confidence = 4;
+}
+
+message LLMResponse {
+  string text = 1;
+  bool is_final = 2;
+}
+
+message TTSAudio {
+  bytes audio_data = 1;
+  int32 sample_rate = 2;
+  string encoding = 3;
+}
+
+message StatusUpdate {
+  string stage = 1;  // "asr", "llm", "tts", "idle"
+  string state = 2;  // "processing", "complete", "error"
+}
+
+message ErrorResponse {
+  int32 code = 1;
+  string message = 2;
+}
+
+message EndSessionRequest {
+  string session_id = 1;
+}
+
+message EndSessionResponse {
+  bool success = 1;
+  SessionStatus final_status = 2;
+}
+
+message GetSessionStatusRequest {
+  string session_id = 1;
+}
+
+message SessionStatus {
+  string session_id = 1;
+  string state = 2;
+  string language_code = 3;
+  int32 conversation_turns = 4;
+  int64 created_at = 5;
+  int64 last_activity = 6;
+}
+
+// ============================================================================
+// ASR Service
+// ============================================================================
+
+service ASRService {
+  // Batch transcription
+  rpc Transcribe(TranscribeRequest) returns (TranscribeResponse);
+  
+  // Streaming transcription
+  rpc TranscribeStream(stream TranscribeStreamRequest) returns (stream TranscribeStreamResponse);
+}
+
+message TranscribeRequest {
+  bytes audio_data = 1;
+  string language_code = 2;
+  int32 sample_rate = 3;
+  ASRConfig config = 4;
+}
+
+message ASRConfig {
+  bool enable_automatic_punctuation = 1;
+  bool enable_word_time_offsets = 2;
+  int32 max_alternatives = 3;
+  string model_name = 4;
+}
+
+message TranscribeResponse {
+  string transcript = 1;
+  float confidence = 2;
+  repeated WordInfo words = 3;
+  float latency_ms = 4;
+}
+
+message TranscribeStreamRequest {
+  oneof request {
+    ASRStreamConfig config = 1;
+    bytes audio_chunk = 2;
+  }
+}
+
+message ASRStreamConfig {
+  string language_code = 1;
+  int32 sample_rate = 2;
+  bool interim_results = 3;
+  ASRConfig asr_config = 4;
+}
+
+message TranscribeStreamResponse {
+  string transcript = 1;
+  bool is_final = 2;
+  float confidence = 3;
+  repeated WordInfo words = 4;
+}
+
+// ============================================================================
+// LLM Service
+// ============================================================================
+
+service LLMService {
+  // Generate response
+  rpc Generate(GenerateRequest) returns (GenerateResponse);
+  
+  // Generate streaming response
+  rpc GenerateStream(GenerateRequest) returns (stream GenerateStreamResponse);
+}
+
+message GenerateRequest {
+  repeated ChatMessage messages = 1;
+  string language_code = 2;
+  LLMConfig config = 3;
+}
+
+message ChatMessage {
+  string role = 1;    // "system", "user", "assistant"
+  string content = 2;
+}
+
+message LLMConfig {
+  int32 max_tokens = 1;
+  float temperature = 2;
+  float top_p = 3;
+  float frequency_penalty = 4;
+  float presence_penalty = 5;
+}
+
+message GenerateResponse {
+  string text = 1;
+  int32 tokens_generated = 2;
+  float latency_ms = 3;
+  string finish_reason = 4;
+}
+
+message GenerateStreamResponse {
+  string text_chunk = 1;
+  bool is_final = 2;
+  string finish_reason = 3;
+}
+
+// ============================================================================
+// TTS Service
+// ============================================================================
+
+service TTSService {
+  // Batch synthesis
+  rpc Synthesize(SynthesizeRequest) returns (SynthesizeResponse);
+  
+  // Streaming synthesis
+  rpc SynthesizeStream(SynthesizeRequest) returns (stream SynthesizeStreamResponse);
+  
+  // List available voices
+  rpc ListVoices(ListVoicesRequest) returns (ListVoicesResponse);
+}
+
+message SynthesizeRequest {
+  string text = 1;
+  string language_code = 2;
+  TTSConfig config = 3;
+}
+
+message TTSConfig {
+  string voice_name = 1;
+  int32 sample_rate = 2;
+  string encoding = 3;
+  float speaking_rate = 4;
+  float pitch = 5;
+}
+
+message SynthesizeResponse {
+  bytes audio_data = 1;
+  int32 sample_rate = 2;
+  string encoding = 3;
+  float duration_ms = 4;
+  float latency_ms = 5;
+}
+
+message SynthesizeStreamResponse {
+  bytes audio_chunk = 1;
+  bool is_final = 2;
+}
+
+message ListVoicesRequest {
+  string language_code = 1;  // Optional filter by language
+}
+
+message ListVoicesResponse {
+  repeated VoiceInfo voices = 1;
+}
+
+message VoiceInfo {
+  string name = 1;
+  string language_code = 2;
+  string gender = 3;
+  string description = 4;
+}
+

@@ -1,0 +1,35 @@
+apiVersion: v2
+name: voice-workflow
+description: Voice-to-Voice Workflow for Hindi using NVIDIA Riva ASR/TTS and LLM
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+
+keywords:
+  - voice
+  - speech
+  - asr
+  - tts
+  - llm
+  - hindi
+  - nvidia
+  - riva
+  - conversational-ai
+
+home: https://github.com/your-org/voice-voice-workflow
+sources:
+  - https://github.com/your-org/voice-voice-workflow
+
+maintainers:
+  - name: Your Team
+    email: team@example.com
+
+annotations:
+  category: AI/ML
+  
+dependencies:
+  - name: redis
+    version: "18.x.x"
+    repository: https://charts.bitnami.com/bitnami
+    condition: redis.enabled
+

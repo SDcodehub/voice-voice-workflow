@@ -1,0 +1,119 @@
+{{- if .Values.nimLlm.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "voice-workflow.fullname" . }}-nim-llm
+  namespace: {{ include "voice-workflow.namespace" . }}
+  labels:
+    {{- include "voice-workflow.labels" . | nindent 4 }}
+    app.kubernetes.io/component: nim-llm
+spec:
+  replicas: {{ .Values.nimLlm.replicas }}
+  selector:
+    matchLabels:
+      {{- include "voice-workflow.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: nim-llm
+  template:
+    metadata:
+      labels:
+        {{- include "voice-workflow.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: nim-llm
+    spec:
+      {{- include "voice-workflow.imagePullSecrets" . | nindent 6 }}
+      containers:
+        - name: nim-llm
+          image: "{{ .Values.nimLlm.image.repository }}:{{ .Values.nimLlm.image.tag }}"
+          imagePullPolicy: {{ .Values.nimLlm.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.nimLlm.service.port }}
+              name: http
+          env:
+            {{- if and .Values.ngc.apiKey (not .Values.ngc.existingSecret) }}
+            - name: NGC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "voice-workflow.fullname" . }}-llm-secrets
+                  key: ngc-api-key
+            {{- else if .Values.ngc.existingSecret }}
+            - name: NGC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.ngc.existingSecret }}
+                  key: ngc-api-key
+                  optional: true
+            {{- end }}
+            - name: NIM_MAX_MODEL_LEN
+              value: "{{ .Values.nimLlm.config.maxModelLen }}"
+          resources:
+            {{- toYaml .Values.nimLlm.resources | nindent 12 }}
+          volumeMounts:
+            - name: nim-cache
+              mountPath: /opt/nim/.cache
+          livenessProbe:
+            httpGet:
+              path: /v1/health/live
+              port: {{ .Values.nimLlm.service.port }}
+            initialDelaySeconds: 600
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /v1/health/ready
+              port: {{ .Values.nimLlm.service.port }}
+            initialDelaySeconds: 300
+            periodSeconds: 10
+      volumes:
+        - name: nim-cache
+          {{- if .Values.nimLlm.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "voice-workflow.fullname" . }}-nim-cache
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.nimLlm.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nimLlm.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "voice-workflow.fullname" . }}-nim-llm
+  namespace: {{ include "voice-workflow.namespace" . }}
+  labels:
+    {{- include "voice-workflow.labels" . | nindent 4 }}
+    app.kubernetes.io/component: nim-llm
+spec:
+  type: {{ .Values.nimLlm.service.type }}
+  ports:
+    - port: {{ .Values.nimLlm.service.port }}
+      targetPort: {{ .Values.nimLlm.service.port }}
+      name: http
+  selector:
+    {{- include "voice-workflow.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: nim-llm
+{{- if .Values.nimLlm.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "voice-workflow.fullname" . }}-nim-cache
+  namespace: {{ include "voice-workflow.namespace" . }}
+  labels:
+    {{- include "voice-workflow.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.nimLlm.persistence.size }}
+  {{- if .Values.nimLlm.persistence.storageClass }}
+  storageClassName: {{ .Values.nimLlm.persistence.storageClass }}
+  {{- end }}
+{{- end }}
+{{- end }}
+

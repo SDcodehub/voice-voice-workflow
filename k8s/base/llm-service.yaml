@@ -1,0 +1,118 @@
+---
+# LLM Service - Conversational AI
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llm-service-config
+  namespace: voice-workflow
+data:
+  LLM_SERVICE_NAME: "llm-service"
+  LLM_SERVICE_HOST: "0.0.0.0"
+  LLM_HTTP_PORT: "8002"
+  LLM_SERVICE_PORT: "50052"
+  LLM_LLM_BACKEND: "nvidia_nim"
+  LLM_NIM_API_URL: "http://nim-llm:8000/v1"
+  LLM_NIM_MODEL: "meta/llama-3.1-8b-instruct"
+  LLM_MAX_TOKENS: "512"
+  LLM_TEMPERATURE: "0.7"
+  LLM_TOP_P: "0.9"
+  LLM_REDIS_HOST: "redis"
+  LLM_REDIS_PORT: "6379"
+  LLM_REDIS_DB: "1"
+  LLM_ENABLE_CACHE: "true"
+  LLM_OTLP_ENDPOINT: "http://otel-collector:4317"
+  LLM_ENABLE_TRACING: "true"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-service
+  namespace: voice-workflow
+  labels:
+    app: llm-service
+    app.kubernetes.io/name: llm-service
+    app.kubernetes.io/component: llm
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: llm-service
+  template:
+    metadata:
+      labels:
+        app: llm-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8002"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: llm-service
+          image: llm-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8002
+              name: http
+            - containerPort: 50052
+              name: grpc
+          envFrom:
+            - configMapRef:
+                name: llm-service-config
+          env:
+            - name: LLM_NIM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: llm-secrets
+                  key: ngc-api-key
+                  optional: true
+          resources:
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8002
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8002
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - llm-service
+                topologyKey: kubernetes.io/hostname
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-service
+  namespace: voice-workflow
+  labels:
+    app: llm-service
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8002
+      targetPort: 8002
+      name: http
+    - port: 50052
+      targetPort: 50052
+      name: grpc
+  selector:
+    app: llm-service
+

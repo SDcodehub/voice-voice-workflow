@@ -1,0 +1,222 @@
+# Production Values Override
+# Use with: helm install voice-workflow ./helm/voice-workflow -f ./helm/voice-workflow/values-prod.yaml
+
+# Production NGC credentials (use sealed secrets in real deployment)
+ngc:
+  existingSecret: "ngc-credentials"  # Pre-created secret
+
+# =============================================================================
+# NVIDIA Riva Server - Production
+# =============================================================================
+rivaServer:
+  replicas: 2  # HA setup
+  
+  resources:
+    limits:
+      nvidia.com/gpu: 1
+      memory: 48Gi
+      cpu: "12"
+    requests:
+      nvidia.com/gpu: 1
+      memory: 32Gi
+      cpu: "8"
+  
+  persistence:
+    storageClass: "gp3"  # High-performance storage
+    size: 200Gi
+  
+  # Use high-performance GPU nodes
+  nodeSelector:
+    nvidia.com/gpu.present: "true"
+    node.kubernetes.io/instance-type: "p4d.24xlarge"  # A100 instances
+
+# =============================================================================
+# NVIDIA NIM LLM Server - Production
+# =============================================================================
+nimLlm:
+  replicas: 2
+  
+  resources:
+    limits:
+      nvidia.com/gpu: 1
+      memory: 80Gi
+      cpu: "24"
+    requests:
+      nvidia.com/gpu: 1
+      memory: 64Gi
+      cpu: "16"
+  
+  persistence:
+    storageClass: "gp3"
+    size: 200Gi
+  
+  nodeSelector:
+    nvidia.com/gpu.present: "true"
+    node.kubernetes.io/instance-type: "p4d.24xlarge"
+
+# =============================================================================
+# Voice Gateway - Production (High Scale)
+# =============================================================================
+voiceGateway:
+  replicas: 5
+  
+  config:
+    maxConcurrentSessions: 50000
+  
+  resources:
+    limits:
+      memory: 2Gi
+      cpu: "2000m"
+    requests:
+      memory: 1Gi
+      cpu: "1000m"
+  
+  autoscaling:
+    enabled: true
+    minReplicas: 5
+    maxReplicas: 50
+    targetCPUUtilizationPercentage: 60
+    targetMemoryUtilizationPercentage: 70
+    # Custom metrics for WebSocket connections
+    behavior:
+      scaleUp:
+        stabilizationWindowSeconds: 30
+        policies:
+          - type: Percent
+            value: 100
+            periodSeconds: 15
+      scaleDown:
+        stabilizationWindowSeconds: 300
+        policies:
+          - type: Percent
+            value: 10
+            periodSeconds: 60
+
+# =============================================================================
+# ASR Service - Production
+# =============================================================================
+asrService:
+  replicas: 4
+  
+  config:
+    grpcPoolSize: 20
+  
+  resources:
+    limits:
+      memory: 2Gi
+      cpu: "2000m"
+    requests:
+      memory: 1Gi
+      cpu: "1000m"
+  
+  autoscaling:
+    enabled: true
+    minReplicas: 4
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 60
+
+# =============================================================================
+# LLM Service - Production
+# =============================================================================
+llmService:
+  replicas: 4
+  
+  config:
+    maxHistoryTurns: 20
+  
+  resources:
+    limits:
+      memory: 2Gi
+      cpu: "2000m"
+    requests:
+      memory: 1Gi
+      cpu: "1000m"
+  
+  autoscaling:
+    enabled: true
+    minReplicas: 4
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 60
+
+# =============================================================================
+# TTS Service - Production
+# =============================================================================
+ttsService:
+  replicas: 4
+  
+  config:
+    grpcPoolSize: 20
+  
+  resources:
+    limits:
+      memory: 2Gi
+      cpu: "2000m"
+    requests:
+      memory: 1Gi
+      cpu: "1000m"
+  
+  autoscaling:
+    enabled: true
+    minReplicas: 4
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 60
+
+# =============================================================================
+# Redis - Production (HA)
+# =============================================================================
+redis:
+  architecture: replication
+  auth:
+    enabled: true
+    existingSecret: "redis-credentials"
+  master:
+    resources:
+      limits:
+        memory: 2Gi
+        cpu: "1000m"
+      requests:
+        memory: 1Gi
+        cpu: "500m"
+    persistence:
+      enabled: true
+      size: 10Gi
+  replica:
+    replicaCount: 2
+    resources:
+      limits:
+        memory: 1Gi
+        cpu: "500m"
+      requests:
+        memory: 512Mi
+        cpu: "250m"
+
+# =============================================================================
+# Ingress - Production
+# =============================================================================
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/websocket-services: "voice-gateway"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  hosts:
+    - host: voice.yourcompany.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: voice-workflow-tls
+      hosts:
+        - voice.yourcompany.com
+
+# =============================================================================
+# Pod Disruption Budget - Production
+# =============================================================================
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
