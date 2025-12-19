@@ -102,13 +102,16 @@ deploy_helm() {
     helm repo add bitnami https://charts.bitnami.com/bitnami 2>/dev/null || true
     helm repo update
     
-    # Create namespace if not exists
-    kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
+    # Build chart dependencies (Redis)
+    echo -e "${YELLOW}Building chart dependencies...${NC}"
+    helm dependency build ./helm/voice-workflow
     
-    # Deploy
+    # Deploy (--create-namespace lets Helm manage the namespace)
     helm upgrade --install ${RELEASE_NAME} ./helm/voice-workflow \
+        --create-namespace \
         --namespace ${NAMESPACE} \
         --values ${VALUES_FILE} \
+        --set namespace.create=false \
         --set ngc.apiKey=${NGC_API_KEY} \
         --set voiceGateway.image.repository=${DOCKER_REGISTRY:-""}voice-gateway \
         --set voiceGateway.image.tag=${IMAGE_TAG:-"latest"} \

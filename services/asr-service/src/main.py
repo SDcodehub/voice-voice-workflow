@@ -6,11 +6,12 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
-from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 import structlog
 
 from config import get_settings
 from asr_client import asr_pool, TranscriptionResult
+from metrics import ASR_REQUESTS, ASR_LATENCY, ASR_AUDIO_DURATION
 
 # Configure logging
 structlog.configure(
@@ -28,24 +29,6 @@ structlog.configure(
 
 logger = structlog.get_logger()
 settings = get_settings()
-
-# Prometheus metrics
-ASR_REQUESTS = Counter(
-    'asr_requests_total',
-    'Total ASR requests',
-    ['language', 'status']
-)
-ASR_LATENCY = Histogram(
-    'asr_latency_seconds',
-    'ASR processing latency',
-    ['language'],
-    buckets=[0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0]
-)
-ASR_AUDIO_DURATION = Histogram(
-    'asr_audio_duration_seconds',
-    'Duration of audio processed',
-    buckets=[1, 2, 5, 10, 30, 60, 120]
-)
 
 
 @asynccontextmanager

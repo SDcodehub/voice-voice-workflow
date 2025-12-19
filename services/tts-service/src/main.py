@@ -7,11 +7,12 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 import structlog
 
 from config import get_settings
 from tts_client import tts_pool
+from metrics import TTS_REQUESTS, TTS_LATENCY, TTS_AUDIO_DURATION, TTS_TEXT_LENGTH
 
 # Configure logging
 structlog.configure(
@@ -29,29 +30,6 @@ structlog.configure(
 
 logger = structlog.get_logger()
 settings = get_settings()
-
-# Prometheus metrics
-TTS_REQUESTS = Counter(
-    'tts_requests_total',
-    'Total TTS requests',
-    ['language', 'status']
-)
-TTS_LATENCY = Histogram(
-    'tts_latency_seconds',
-    'TTS synthesis latency',
-    ['language'],
-    buckets=[0.1, 0.25, 0.5, 1.0, 2.0, 5.0]
-)
-TTS_AUDIO_DURATION = Histogram(
-    'tts_audio_duration_seconds',
-    'Duration of audio generated',
-    buckets=[1, 2, 5, 10, 30, 60]
-)
-TTS_TEXT_LENGTH = Histogram(
-    'tts_text_length_chars',
-    'Length of text synthesized',
-    buckets=[10, 50, 100, 200, 500, 1000]
-)
 
 
 class SynthesizeRequest(BaseModel):

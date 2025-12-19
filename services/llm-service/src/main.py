@@ -6,11 +6,12 @@ from typing import List, Dict, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel
-from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 import structlog
 
 from config import get_settings
 from llm_client import llm_client
+from metrics import LLM_REQUESTS, LLM_LATENCY, LLM_TOKENS
 
 # Configure logging
 structlog.configure(
@@ -28,24 +29,6 @@ structlog.configure(
 
 logger = structlog.get_logger()
 settings = get_settings()
-
-# Prometheus metrics
-LLM_REQUESTS = Counter(
-    'llm_requests_total',
-    'Total LLM requests',
-    ['language', 'status', 'cached']
-)
-LLM_LATENCY = Histogram(
-    'llm_latency_seconds',
-    'LLM generation latency',
-    ['language'],
-    buckets=[0.5, 1.0, 2.0, 5.0, 10.0, 30.0]
-)
-LLM_TOKENS = Counter(
-    'llm_tokens_generated_total',
-    'Total tokens generated',
-    ['language']
-)
 
 
 class GenerateRequest(BaseModel):

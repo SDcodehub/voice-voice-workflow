@@ -34,25 +34,43 @@ structlog.configure(
 logger = structlog.get_logger()
 settings = get_settings()
 
-# Prometheus metrics
-REQUEST_COUNT = Counter(
-    'voice_gateway_requests_total',
-    'Total requests',
+# Prometheus metrics - use REGISTRY to avoid duplicate registration
+from prometheus_client import REGISTRY
+
+def get_or_create_counter(name, description, labels=None):
+    """Get existing counter or create new one."""
+    try:
+        return Counter(name, description, labels or [])
+    except ValueError:
+        # Already registered, get from registry
+        return REGISTRY._names_to_collectors.get(name + '_total') or \
+               REGISTRY._names_to_collectors.get(name)
+
+def get_or_create_histogram(name, description, labels=None, buckets=None):
+    """Get existing histogram or create new one."""
+    try:
+        return Histogram(name, description, labels or [], buckets=buckets or [])
+    except ValueError:
+        return REGISTRY._names_to_collectors.get(name)
+
+REQUEST_COUNT = get_or_create_counter(
+    'voice_gateway_http_requests',
+    'Total HTTP requests',
     ['method', 'endpoint', 'status']
 )
-WEBSOCKET_CONNECTIONS = Counter(
-    'voice_gateway_websocket_connections_total',
+WEBSOCKET_CONNECTIONS = get_or_create_counter(
+    'voice_gateway_ws_connections',
     'Total WebSocket connections'
 )
-WEBSOCKET_ACTIVE = Counter(
-    'voice_gateway_websocket_active',
+WEBSOCKET_ACTIVE = get_or_create_counter(
+    'voice_gateway_ws_active',
     'Active WebSocket connections'
 )
-PIPELINE_LATENCY = Histogram(
+PIPELINE_LATENCY = get_or_create_histogram(
     'voice_gateway_pipeline_latency_seconds',
     'Pipeline processing latency',
     ['stage'],
-    buckets=[0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]
+    [0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]
 )
 
 
