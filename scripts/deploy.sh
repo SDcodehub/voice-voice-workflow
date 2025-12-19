@@ -24,17 +24,29 @@ check_prerequisites() {
         exit 1
     fi
     
-    if ! command -v docker &> /dev/null; then
-        echo -e "${RED}docker not found. Please install docker.${NC}"
-        exit 1
-    fi
-    
     echo -e "${GREEN}All prerequisites met.${NC}"
 }
 
-# Build Docker images
+# Check container build tool prerequisite (only for build/push)
+# Supports both docker and podman
+CONTAINER_CMD=""
+check_container_tool() {
+    if command -v podman &> /dev/null; then
+        CONTAINER_CMD="podman"
+        echo -e "${GREEN}Using podman for container builds.${NC}"
+    elif command -v docker &> /dev/null; then
+        CONTAINER_CMD="docker"
+        echo -e "${GREEN}Using docker for container builds.${NC}"
+    else
+        echo -e "${RED}No container build tool found. Please install docker or podman.${NC}"
+        exit 1
+    fi
+}
+
+# Build container images
 build_images() {
-    echo -e "${YELLOW}Building Docker images...${NC}"
+    check_container_tool
+    echo -e "${YELLOW}Building container images...${NC}"
     
     local REGISTRY=${DOCKER_REGISTRY:-""}
     local TAG=${IMAGE_TAG:-"latest"}
@@ -42,15 +54,16 @@ build_images() {
     # Build each service
     for service in voice-gateway asr-service llm-service tts-service; do
         echo "Building $service..."
-        docker build -t ${REGISTRY}${service}:${TAG} ./services/${service}/
+        ${CONTAINER_CMD} build -t ${REGISTRY}${service}:${TAG} ./services/${service}/
     done
     
-    echo -e "${GREEN}Docker images built successfully.${NC}"
+    echo -e "${GREEN}Container images built successfully.${NC}"
 }
 
-# Push Docker images
+# Push container images
 push_images() {
-    echo -e "${YELLOW}Pushing Docker images...${NC}"
+    check_container_tool
+    echo -e "${YELLOW}Pushing container images...${NC}"
     
     local REGISTRY=${DOCKER_REGISTRY:-""}
     local TAG=${IMAGE_TAG:-"latest"}
@@ -61,11 +74,13 @@ push_images() {
     fi
     
     for service in voice-gateway asr-service llm-service tts-service; do
+        echo "Tagging $service..."
+        ${CONTAINER_CMD} tag localhost/${service}:${TAG} ${REGISTRY}${service}:${TAG}
         echo "Pushing $service..."
-        docker push ${REGISTRY}${service}:${TAG}
+        ${CONTAINER_CMD} push ${REGISTRY}${service}:${TAG}
     done
     
-    echo -e "${GREEN}Docker images pushed successfully.${NC}"
+    echo -e "${GREEN}Container images pushed successfully.${NC}"
 }
 
 # Deploy using Helm
@@ -160,8 +175,8 @@ usage() {
     echo "Usage: $0 [command]"
     echo ""
     echo "Commands:"
-    echo "  build       Build Docker images"
-    echo "  push        Push Docker images to registry"
+    echo "  build       Build container images (requires docker or podman)"
+    echo "  push        Push container images to registry (requires docker or podman)"
     echo "  deploy      Deploy using Helm (default)"
     echo "  kustomize   Deploy using Kustomize"
     echo "  status      Get deployment status"
@@ -170,7 +185,7 @@ usage() {
     echo ""
     echo "Environment variables:"
     echo "  NGC_API_KEY      - NVIDIA NGC API key (required)"
-    echo "  DOCKER_REGISTRY  - Docker registry prefix (optional)"
+    echo "  DOCKER_REGISTRY  - Container registry prefix (optional)"
     echo "  IMAGE_TAG        - Image tag (default: latest)"
     echo "  NAMESPACE        - Kubernetes namespace (default: voice-workflow)"
     echo "  RELEASE_NAME     - Helm release name (default: voice-workflow)"
