@@ -14,7 +14,7 @@ from clients.asr import ASRClient
 from clients.llm import LLMClient
 from clients.tts import TTSClient
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG) # Enable DEBUG logs
 logger = logging.getLogger(__name__)
 
 class VoiceGatewayServicer(voice_workflow_pb2_grpc.VoiceGatewayServicer):
@@ -32,10 +32,10 @@ class VoiceGatewayServicer(voice_workflow_pb2_grpc.VoiceGatewayServicer):
         # In production, might need SSL options
         self.auth = riva.client.Auth(uri=self.riva_uri)
 
-        # Initialize Clients
-        self.asr_client = ASRClient(auth=self.auth)
+        # Initialize Clients (LLM and TTS can be shared or lightweight)
         self.llm_client = LLMClient(base_url=self.nim_url)
-        self.tts_client = TTSClient(auth=self.auth)
+        # TTSClient might need lang config too, checking later. 
+        # For now, we move ASRClient creation to per-session.
 
     async def StreamAudio(self, request_iterator, context):
         """
@@ -69,6 +69,14 @@ class VoiceGatewayServicer(voice_workflow_pb2_grpc.VoiceGatewayServicer):
                 # We can proceed or error out. Proceeding for robustness.
             else:
                 logger.info(f"Session started: {first_msg.config}")
+                # Initialize ASR Client with session language
+                language = first_msg.config.language_code if first_msg.config.language_code else "en-US"
+                sample_rate = first_msg.config.sample_rate if first_msg.config.sample_rate else 16000
+                asr_client = ASRClient(auth=self.auth, language_code=language, sample_rate=sample_rate)
+                
+                # Initialize TTS Client with matching language and sample rate for client playback
+                tts_client = TTSClient(auth=self.auth, language_code=language, sample_rate=sample_rate)
+                
                 yield voice_workflow_pb2.ServerMessage(
                     event=voice_workflow_pb2.ServerEvent(
                         type=voice_workflow_pb2.LISTENING,
@@ -85,8 +93,10 @@ class VoiceGatewayServicer(voice_workflow_pb2_grpc.VoiceGatewayServicer):
                 while True:
                     msg = await input_queue.get()
                     if msg is None:
+                        logger.info("End of input stream received.")
                         break
                     if msg.HasField('audio_chunk'):
+                        # logger.debug(f"Received audio chunk: {len(msg.audio_chunk)} bytes")
                         yield msg.audio_chunk
                     elif msg.HasField('text_input'):
                         # TODO: Handle text input (bypass ASR)
@@ -96,7 +106,7 @@ class VoiceGatewayServicer(voice_workflow_pb2_grpc.VoiceGatewayServicer):
             # 3. Process Pipeline: ASR -> LLM -> TTS
             # We iterate over ASR results. This drives the whole loop.
             
-            asr_stream = self.asr_client.transcribe_stream(audio_source_gen())
+            asr_stream = asr_client.transcribe_stream(audio_source_gen())
             
             async for transcript, is_final in asr_stream:
                 if not is_final:
@@ -128,7 +138,7 @@ class VoiceGatewayServicer(voice_workflow_pb2_grpc.VoiceGatewayServicer):
                                     event=voice_workflow_pb2.ServerEvent(type=voice_workflow_pb2.SPEAKING)
                                 )
                                 logger.info(f"Speaking: {to_speak}")
-                                tts_stream = self.tts_client.synthesize_stream(to_speak)
+                                tts_stream = tts_client.synthesize_stream(to_speak)
                                 async for audio_chunk in tts_stream:
                                     yield voice_workflow_pb2.ServerMessage(audio_chunk=audio_chunk)
                             sentence_buffer = ""
@@ -137,7 +147,7 @@ class VoiceGatewayServicer(voice_workflow_pb2_grpc.VoiceGatewayServicer):
                     if sentence_buffer.strip():
                         to_speak = sentence_buffer.strip()
                         logger.info(f"Speaking (Final): {to_speak}")
-                        tts_stream = self.tts_client.synthesize_stream(to_speak)
+                        tts_stream = tts_client.synthesize_stream(to_speak)
                         async for audio_chunk in tts_stream:
                             yield voice_workflow_pb2.ServerMessage(audio_chunk=audio_chunk)
 

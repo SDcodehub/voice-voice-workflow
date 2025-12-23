@@ -6,7 +6,7 @@ from openai import AsyncOpenAI
 logger = logging.getLogger(__name__)
 
 class LLMClient:
-    def __init__(self, base_url: str = None, api_key: str = "dummy", model: str = "meta/llama3-8b-instruct"):
+    def __init__(self, base_url: str = None, api_key: str = "dummy", model: str = "meta/llama-3.1-8b-instruct"):
         """
         Initialize the LLM Client for NVIDIA NIM.
         
@@ -18,7 +18,7 @@ class LLMClient:
         # If no URL is provided, try to find it in env vars, otherwise default to localhost
         self.base_url = base_url or os.getenv("LLM_SERVICE_URL", "http://localhost:8000/v1")
         self.api_key = api_key or os.getenv("LLM_API_KEY", "dummy")
-        self.model = model or os.getenv("LLM_MODEL", "meta/llama3-8b-instruct")
+        self.model = model or os.getenv("LLM_MODEL", "meta/llama-3.1-8b-instruct")
         
         logger.info(f"Initializing LLM Client: URL={self.base_url}, Model={self.model}")
         

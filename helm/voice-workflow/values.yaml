@@ -4,21 +4,20 @@ global:
 
 # Gateway Service (Our Python Code)
 gateway:
-  image: voice-gateway:latest
-  imagePullPolicy: IfNotPresent
+  image: docker.io/sagdesai/voice-gateway:latest
+  imagePullPolicy: Always
   replicas: 1
   service:
     type: ClusterIP
     port: 50051
   env:
-    # URL will be constructed from release name
-    # e.g. voice-demo-riva-server:50051
-    rivaUrlSuffix: "-riva-server:50051"
-    nimUrlSuffix: "-nim:8000/v1"
+    # Direct URLs to existing services
+    rivaUri: "riva-api:50051"
+    nimUrl: "http://meta-llama3-8b-instruct:8000/v1"
 
 # External Dependency: NVIDIA Riva (ASR/TTS)
 riva:
-  enabled: true
+  enabled: false  # We deployed this manually
   ngcSecret: "ngc-secret"
   service:
     type: ClusterIP
@@ -28,7 +27,7 @@ riva:
 
 # External Dependency: NVIDIA NIM (LLM)
 nim:
-  enabled: true
+  enabled: false # We deployed this manually
   image: nvcr.io/nim/meta/llama3-8b-instruct:latest
   replicas: 1
   resources:

@@ -25,7 +25,7 @@ else
     exit 1
 fi
 
-$CMD build -t $IMAGE_NAME:$TAG .
+$CMD build --no-cache -t $IMAGE_NAME:$TAG .
 
 echo "✅ Build Complete: $IMAGE_NAME:$TAG"
 

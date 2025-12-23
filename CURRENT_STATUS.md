@@ -9,17 +9,22 @@ This project implements a scalable, low-latency Voice-to-Voice AI pipeline for H
 3.  **Strict Contracts**: We use Protobuf (`.proto`) to define exact data structures before writing code.
 4.  **Modern Python**: We use `uv` for dependency management and `asyncio` for high-concurrency handling in the Gateway.
 
-## Current Progress (Phase 2: Core Components)
+## Current Progress (Phase 3: Kubernetes Deployment)
 - [x] **Architecture**: Defined in `docs/architecture` and `proto/`.
 - [x] **Gateway Skeleton**: Basic gRPC server set up in `services/voice-gateway`.
-- [x] **ASR Integration**: Implemented `ASRClient` in `src/clients/asr.py`.
-    - Verified with unit tests (`tests/test_asr.py`).
-- [x] **LLM Integration**: Implemented `LLMClient` in `src/clients/llm.py`.
-    - Verified with unit tests (`tests/test_llm.py`).
-- [x] **TTS Integration**: Implemented `TTSClient` in `src/clients/tts.py`.
-    - Verified with unit tests (`tests/test_tts.py`).
-- [x] **End-to-End Logic**: Wired up ASR -> LLM -> TTS pipeline in `src/main.py`.
-    - Verified with integration tests (`tests/test_gateway.py`).
+- [x] **ASR/TTS Integration**: Wired up in Gateway.
+- [x] **Kubernetes Infrastructure**:
+    - [x] **Storage**: `local-storage` PV/PVCs configured and bound on `node001`.
+    - [x] **Secrets**: Automated secret creation (`ngc-api`, `modelpullsecret`, `riva-model-deploy-key`) via `deploy_riva.sh`.
+    - [x] **Riva Deployment**: Riva Server deployed via Helm and verified.
+        - **Status**: Running.
+        - **Health Check**: `HTTP 200 OK` on `/v2/health/ready`.
+    - [x] **LLM NIM**: NIM (Llama 3 8B) deployed and running.
+- [x] **Gateway Deployment**:
+    - [x] **Container**: Image built and pushed to `docker.io/sagdesai/voice-gateway`.
+    - [x] **Helm**: Chart updated to connect to existing Riva and NIM services.
+    - [x] **Deploy**: Gateway pod deployed (`voice-gateway` release).
+    - [x] **E2E Test**: Verified connectivity and basic flow using internal test client.
 
 ## Folder Structure Mapping
 
@@ -29,28 +34,23 @@ voice-voice-workflow/
 ├── docs/                       # Documentation
 │   └── architecture/           # Mermaid diagrams & visual designs
 ├── helm/                       # Infrastructure as Code (Helm Charts)
-│   └── voice-workflow/         # The main application chart
+│   ├── voice-workflow/         # The main application chart
+│   └── riva-api/               # Local Riva Helm Chart
+├── k8s/
+│   └── infra/                  # Infrastructure manifests (PVCs, NIMs)
 ├── proto/                      # Interface Definitions (The Contract)
 │   └── voice_workflow.proto    # gRPC service definition
+├── scripts/
+│   ├── deploy_infra.sh         # Script to deploy base infra
+│   ├── deploy_riva.sh          # Script to deploy Riva (with secrets)
+│   ├── build_gateway.sh        # Build & Push Gateway Image
+│   └── deploy_gateway.sh       # Deploy Gateway using Helm
 ├── services/                   # Microservices Source Code
 │   └── voice-gateway/          # The Orchestrator Service
 │       ├── Dockerfile          # Container build definition
-│       ├── pyproject.toml      # Dependencies
-│       ├── uv.lock             # Exact dependency versions
 │       ├── src/                # Application Source Code
-│       │   ├── main.py         # Entry point & gRPC Server implementation
-│       │   ├── clients/        # External Service Wrappers
-│       │   │   ├── asr.py      # Riva ASR Client
-│       │   │   ├── llm.py      # NIM LLM Client
-│       │   │   └── tts.py      # Riva TTS Client
-│       │   ├── voice_workflow_pb2.py       # Generated gRPC code
-│       │   └── voice_workflow_pb2_grpc.py  # Generated gRPC stubs
 │       └── tests/              # Test Scripts
-│           ├── test_client.py  # Standalone script to simulate a user client
-│           ├── test_gateway.py # Integration test for the full pipeline
-│           ├── test_asr.py     # Unit test for ASR
-│           ├── test_llm.py     # Unit test for LLM
-│           └── test_tts.py     # Unit test for TTS
+│           └── setup_mac_client.sh # Easy setup for local Mac client
 └── PLAN.md                     # High-level project plan & checklist
 ```
 
@@ -58,6 +58,8 @@ voice-voice-workflow/
 
 ### 1. Prerequisites
 - **uv**: Python package manager (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
+- **Kubernetes**: Cluster with NVIDIA GPU support.
+- **NGC API Key**: Exported as `NGC_API_KEY`.
 
 ### 2. Development Workflow
 To work on the `voice-gateway`:
@@ -67,24 +69,27 @@ uv sync                     # Install dependencies
 uv run python src/main.py   # Run the server locally
 ```
 
-### 3. Testing
-To verify components:
+### 3. Deployment
 ```bash
-cd services/voice-gateway
-export PYTHONPATH=$PYTHONPATH:./src:.
+# 1. Deploy Infrastructure (NIM, PVCs)
+./scripts/deploy_infra.sh
 
-# Run all unit tests
-uv run python -m unittest discover tests
+# 2. Deploy Riva (ASR/TTS)
+export NGC_API_KEY=...
+./scripts/deploy_riva.sh
 
-# Run key integration test
-uv run python -m unittest tests/test_gateway.py
+# 3. Deploy Gateway
+./scripts/build_gateway.sh
+./scripts/deploy_gateway.sh
 ```
 
-## Next Immediate Steps (Phase 3: Deployment)
-The project is ready for deployment. The code logic is complete and tested.
-1.  **Containerize**: Build the Docker image for the gateway.
-2.  **Helm Charts**: Complete the `helm/voice-workflow` chart.
-    -   Add dependencies (Riva, Redis if needed).
-    -   Create ConfigMaps for environment variables (`Riva URI`, `NIM URL`).
-    -   Configure Ingress for gRPC.
-3.  **Deploy**: Apply to the K8s cluster.
+### 4. Client Testing (Mac/Local)
+To test with your microphone:
+1.  **SSH Tunnel**: `ssh -L 50051:localhost:50051 sagdesai@10.41.88.111`
+2.  **Setup Client**: Download `services/voice-gateway/tests/setup_mac_client.sh` and run it.
+3.  **Run**: `uv run test_mic_client.py`
+
+## Next Immediate Steps (Phase 4: Optimization)
+1.  **Latency Tuning**: Measure E2E latency and optimize buffer sizes.
+2.  **Ingress**: Expose the gRPC gateway to the outside world using an Ingress Controller (Traefik/Nginx) with HTTP/2 support.
+3.  **Client**: Develop a web or CLI client to interact with the deployed gateway.

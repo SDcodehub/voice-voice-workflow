@@ -7,10 +7,13 @@ import queue
 logger = logging.getLogger(__name__)
 
 class ASRClient:
-    def __init__(self, auth: riva.client.Auth, language_code: str = "hi-IN"):
+    def __init__(self, auth: riva.client.Auth, language_code: str = "en-US", sample_rate: int = 16000):
         self.auth = auth
         self.language_code = language_code
+        self.sample_rate = sample_rate
         self.asr_service = riva.client.ASRService(self.auth)
+        
+        logger.info(f"Initializing ASR Client: Language={self.language_code}, SampleRate={self.sample_rate}")
         
         # Configuration for streaming recognition
         self.config = riva.client.StreamingRecognitionConfig(
@@ -18,9 +21,9 @@ class ASRClient:
                 encoding=riva.client.AudioEncoding.LINEAR_PCM,
                 language_code=self.language_code,
                 max_alternatives=1,
-                enable_automatic_punctuation=True,
+                enable_automatic_punctuation=False,
                 verbatim_transcripts=True,
-                sample_rate_hertz=16000, 
+                sample_rate_hertz=self.sample_rate, 
             ),
             interim_results=True,
         )
@@ -93,6 +96,7 @@ class ASRClient:
                             transcript = result.alternatives[0].transcript
                             is_final = result.is_final
                             if transcript:
+                                logger.debug(f"ASR Result: '{transcript}' (final={is_final})")
                                 asyncio.run_coroutine_threadsafe(
                                     result_queue.put((transcript, is_final)), loop
                                 )
@@ -101,16 +105,19 @@ class ASRClient:
                 finally:
                     asyncio.run_coroutine_threadsafe(result_queue.put(None), loop)
 
-            # Start the consumer thread
-            await loop.run_in_executor(None, consume_riva_responses)
+            # Start the consumer in a background thread (don't await - run concurrently!)
+            consumer_future = loop.run_in_executor(None, consume_riva_responses)
 
-            # Yield results back to the caller
+            # Yield results as they come from the background thread
             while True:
                 item = await result_queue.get()
                 if item is None:
                     break
                 transcript, is_final = item
                 yield transcript, is_final
+            
+            # Wait for the consumer to finish cleanly
+            await consumer_future
 
         except Exception as e:
             logger.error(f"Error during transcription: {e}")

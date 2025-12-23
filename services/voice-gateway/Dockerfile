@@ -11,6 +11,9 @@ COPY pyproject.toml uv.lock ./
 # Install dependencies
 RUN uv sync --frozen --no-install-project
 
+# Force rebuild
+ENV FORCE_REBUILD=1
+
 # Copy source code
 COPY src/ src/
 

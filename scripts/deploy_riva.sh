@@ -19,10 +19,13 @@ if [ ! -d "$CHART_PATH" ]; then
     exit 1
 fi
 
-# 2. Create Docker Registry Secret (if not exists)
-# The chart also creates a secret if ngcCredentials.password is provided, but we can keep this for safety or remove if redundant.
-# Based on the chart, 'imagepullsecret' is created if ngcCredentials.password is set.
-echo "🔑 Ensuring Image Pull Secret..."
+# 2. Create Secrets Manually
+# The Helm chart might not create all necessary secrets, or might create them incorrectly.
+# We manually create them to ensure reliability.
+
+echo "🔑 Creating Secrets..."
+
+# Image Pull Secret (for pulling containers)
 kubectl create secret docker-registry nvcr.io-secret \
     --docker-server=nvcr.io \
     --docker-username='$oauthtoken' \
@@ -30,12 +33,28 @@ kubectl create secret docker-registry nvcr.io-secret \
     -n $NAMESPACE \
     --dry-run=client -o yaml | kubectl apply -f -
 
+# Model Pull Secret (for init container to download models)
+kubectl create secret generic modelpullsecret \
+    --from-literal=apikey=$NGC_API_KEY \
+    -n $NAMESPACE \
+    --dry-run=client -o yaml | kubectl apply -f -
+
+# Model Deploy Key (for decrypting models)
+# The chart expects this to be base64 encoded if passed via values, but creating it manually avoids chart issues.
+# We create it with the RAW value 'tlt_encode' which kubectl will encode.
+kubectl create secret generic riva-model-deploy-key \
+    --from-literal=key=tlt_encode \
+    -n $NAMESPACE \
+    --dry-run=client -o yaml | kubectl apply -f -
+
+
 # 3. Deploy Riva
 echo "🚀 Installing Riva Helm Chart from $CHART_PATH..."
 
-# Prepare keys as per documentation
-# ngcCredentials.password should be the raw API Key
-# modelDeployKey should be base64 encoded 'tlt_encode'
+# We pass dummy/empty values for the secrets in the Helm command because we already created them.
+# This prevents the chart from trying to create malformed secrets.
+# We still set modelRepoGenerator.modelDeployKey to satisfy any required checks, but point to our existing secret.
+
 MODEL_DEPLOY_KEY=$(echo -n "tlt_encode" | base64 -w0)
 
 helm upgrade --install $RELEASE_NAME $CHART_PATH \

@@ -7,7 +7,7 @@ import queue
 logger = logging.getLogger(__name__)
 
 class TTSClient:
-    def __init__(self, auth: riva.client.Auth, language_code: str = "hi-IN", sample_rate: int = 44100):
+    def __init__(self, auth: riva.client.Auth, language_code: str = "en-US", sample_rate: int = 16000):
         self.auth = auth
         self.language_code = language_code
         self.sample_rate = sample_rate
@@ -33,12 +33,14 @@ class TTSClient:
 
         def run_riva_synthesis():
             try:
+                # Voice name format for Riva TTS models varies by deployment
+                # For fastpitch_hifigan models, use "English-US" format or empty string for default
                 responses = self.tts_service.synthesize_online(
                     text=text,
                     language_code=self.language_code,
                     encoding=riva.client.AudioEncoding.LINEAR_PCM,
                     sample_rate_hz=self.sample_rate,
-                    voice_name=f"{self.language_code}-Standard-A" # Assuming standard voice exists, or let Riva pick default
+                    voice_name=""  # Let Riva use the default voice for the language
                 )
                 
                 for response in responses:

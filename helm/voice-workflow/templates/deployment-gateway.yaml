@@ -20,7 +20,7 @@ spec:
             - containerPort: 50051
           env:
             - name: RIVA_URI
-              value: "{{ .Release.Name }}{{ .Values.gateway.env.rivaUrlSuffix }}"
+              value: {{ .Values.gateway.env.rivaUri | quote }}
             - name: LLM_SERVICE_URL
-              value: "http://{{ .Release.Name }}{{ .Values.gateway.env.nimUrlSuffix }}"
+              value: {{ .Values.gateway.env.nimUrl | quote }}
             # Add config for Riva SSL if needed

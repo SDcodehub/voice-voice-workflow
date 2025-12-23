@@ -23,7 +23,7 @@ async def run():
             logger.info("Sending Config...")
             yield voice_workflow_pb2.ClientMessage(
                 config=voice_workflow_pb2.VoiceConfig(
-                    language_code="hi-IN",
+                    language_code="en-US",
                     session_id="test-session-123",
                     sample_rate=16000
                 )
