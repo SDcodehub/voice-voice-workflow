@@ -1,0 +1,14 @@
+[project]
+name = "voice-gateway"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "aiohttp>=3.13.2",
+    "grpcio>=1.76.0",
+    "grpcio-tools>=1.76.0",
+    "numpy>=2.2.6",
+    "protobuf>=6.33.2",
+    "python-dotenv>=1.2.1",
+]

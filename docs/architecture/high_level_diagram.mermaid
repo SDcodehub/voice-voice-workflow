@@ -1,25 +1,25 @@
 graph TD
-    Client[User Client<br/>(Web/Mobile/SIP)]
+    Client["User Client<br/>(Web/Mobile/SIP)"]
     
     subgraph K8s_Cluster["Kubernetes Cluster (GPU Enabled)"]
-        Ingress[Ingress Controller<br/>(Nginx/Traefik)]
+        Ingress["Ingress Controller<br/>(Nginx/Traefik)"]
         
         subgraph Voice_Workflow["Voice Workflow Namespace"]
-            Gateway[Voice Gateway / Orchestrator<br/>(Python/Go gRPC)]
+            Gateway["Voice Gateway / Orchestrator<br/>(Python/Go gRPC)"]
             
             subgraph ASR_Service["ASR Service (Riva)"]
-                RivaASR[Riva ASR Server]
-                ModelASR[Hindi ASR Model]
+                RivaASR["Riva ASR Server"]
+                ModelASR["Hindi ASR Model"]
             end
             
             subgraph LLM_Service["LLM Service"]
-                LLM[LLM Engine<br/>(NIM/vLLM)]
-                ModelLLM[Hindi/Multilingual LLM]
+                LLM["LLM Engine<br/>(NIM/vLLM)"]
+                ModelLLM["Hindi/Multilingual LLM"]
             end
             
             subgraph TTS_Service["TTS Service (Riva)"]
-                RivaTTS[Riva TTS Server]
-                ModelTTS[Hindi TTS Model]
+                RivaTTS["Riva TTS Server"]
+                ModelTTS["Hindi TTS Model"]
             end
         end
     end
