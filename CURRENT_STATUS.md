@@ -147,3 +147,13 @@ uv run test_mic_client.py
 2.  **Ingress**: Expose the gRPC gateway to the outside world using an Ingress Controller (Traefik/Nginx) with HTTP/2 support.
 3.  **Client**: Develop a web or CLI client to interact with the deployed gateway.
 4.  **Multi-language**: Add Hindi ASR/TTS models for Hindi voice workflow.
+
+## setup on mac instructions
+Quick Reference for Tomorrow
+On Server (headnode):
+kubectl port-forward -n voice-workflow svc/voice-gateway-gateway 50051:50051 --address 0.0.0.0
+On Mac (Terminal 1 - SSH tunnel):
+ssh -L 50051:localhost:50051 sagdesai@10.41.88.111
+On Mac (Terminal 2 - run client):
+cd ~/Desktop/voice-clientuv run test_mic_client.py
+
