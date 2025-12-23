@@ -1,0 +1,7 @@
+apiVersion: v2
+name: voice-workflow
+description: End-to-End Hindi Voice-to-Voice Workflow
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+

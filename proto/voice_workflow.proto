@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package voice_workflow;
+
+service VoiceGateway {
+  // Bidirectional streaming for voice interaction
+  rpc StreamAudio (stream ClientMessage) returns (stream ServerMessage);
+}
+
+message ClientMessage {
+  oneof content {
+    VoiceConfig config = 1;
+    bytes audio_chunk = 2;
+    string text_input = 3; // For text-mode fallback
+  }
+}
+
+message VoiceConfig {
+  string language_code = 1; // e.g., "hi-IN"
+  string session_id = 2;
+  int32 sample_rate = 3;
+}
+
+message ServerMessage {
+  oneof content {
+    string transcript_chunk = 1; // From ASR (Interim or Final)
+    string llm_response_chunk = 2; // From LLM text
+    bytes audio_chunk = 3; // From TTS
+    ServerEvent event = 4;
+  }
+}
+
+message ServerEvent {
+    EventType type = 1;
+    string message = 2;
+}
+
+enum EventType {
+  EVENT_UNSPECIFIED = 0;
+  LISTENING = 1;
+  PROCESSING = 2;
+  SPEAKING = 3;
+  ERROR = 4;
+  END_OF_TURN = 5;
+}
+

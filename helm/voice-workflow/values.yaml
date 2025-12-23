@@ -1,0 +1,17 @@
+gateway:
+  image: voice-gateway:latest
+  replicas: 1
+  port: 50051
+
+asr:
+  enabled: true
+  model: "hindi"
+
+tts:
+  enabled: true
+  model: "hindi"
+
+llm:
+  enabled: true
+  model: "llama-2-70b-chat" # Example
+

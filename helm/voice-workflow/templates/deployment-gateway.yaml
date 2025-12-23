@@ -1,0 +1,5 @@
+# TODO: Define Deployment for Voice Gateway
+# apiVersion: apps/v1
+# kind: Deployment
+# ...
+
