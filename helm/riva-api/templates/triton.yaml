@@ -1,0 +1,478 @@
+# Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+#  * Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#  * Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the distribution.
+#  * Neither the name of NVIDIA CORPORATION nor the names of its
+#    contributors may be used to endorse or promote products derived
+#    from this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
+# EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+# PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+# CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+# EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+# PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+# OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+{{- $root := . }}
+
+{{- range $name, $config := .Values.modelRepoGenerator.ngcModelConfigs }}
+{{- if $config.enabled }}
+{{- with $ -}}
+{{- $model_list := $config.models }}
+{{- $group_name := lower $name }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $group_name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ $group_name }}
+    chart: {{ template "riva-server.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+  annotations:
+    prometheus.io/scrape: 'true'
+    prometheus.io/port: "8002"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8000
+      targetPort: http
+      name: triton-http
+    - port: 8001
+      targetPort: grpc
+      name: triton-grpc
+    - port: 8002
+      targetPort: metrics
+      name: triton-metrics
+  selector:
+    app: {{ $group_name }}
+    release: {{ .Release.Name }}
+---
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: configmap-{{ $group_name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ template "riva-server.name" . }}
+    chart: {{ template "riva-server.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+data:
+  download-and-deploy-models.sh: |
+    #!/bin/bash
+
+    # deploy model in its own directory
+    mkdir /data/models
+    for model_full_path in $@
+    do
+      model_name=${model_full_path##*/}
+      model_path="/data/models/${model_name//:/_}"
+      export MODEL_DIR=$model_path
+      download_and_deploy_ngc_models $model_full_path 2>&1 | tee /dev/shm/{{ $group_name }}.log
+      num_models_deployed=$(grep -e "skipping deployment" -e "Extract_binaries" /dev/shm/{{ $group_name }}.log | grep "/data/models" | wc -l)
+      if [[ $num_models_deployed -eq 0 ]]
+      then
+        echo "Model deploy failed"
+        exit -1
+      fi
+    done
+
+  download-models.sh: |
+    #!/bin/bash
+    # deploy model in its own directory
+    mkdir -p /data/models
+    for model_full_path in $@
+    do
+      model_name=${model_full_path##*/}
+      model_name=${model_name//:/_}
+      time aws s3 sync s3://{{ .Values.awsCredentials.bucketName }}/{{ template "model_version" $root }}/{{ .Values.cacheConfig.gpuProduct }}/models/${model_name} /data/models/${model_name} --no-progress
+    done
+
+  upload-models.sh: |
+    #!/bin/bash
+    # replace symlinks with file
+
+    # install aws cli in Triton container
+    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -s -o "awscliv2.zip" && unzip -q awscliv2.zip && ./aws/install --install-dir /tmp/aws/ --bin-dir /tmp/aws
+    PATH=$PATH:/tmp/aws
+
+    for file in $(find /data/ -type l); do echo "Fixing symlink $file"; cp --remove-destination "$(realpath ${file})" ${file}; done
+
+    time aws s3 sync /data/models s3://{{ .Values.awsCredentials.bucketName }}/{{ template "model_version" $root }}/{{ .Values.cacheConfig.gpuProduct }}/models --exclude '*pycache*' --no-progress
+
+  run-triton.sh: |
+    #!/bin/bash
+    set -x
+    model_repos_to_load=
+
+    download_models=true
+    if [ -d /data/models ]; then
+      echo "Model repository exists"
+      download_models=false
+    fi
+
+    if [ "$download_models" = true ]; then
+      # install aws cli in Triton container
+      curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -s -o "awscliv2.zip" && unzip -q awscliv2.zip && ./aws/install --install-dir /tmp/aws/ --bin-dir /tmp/aws
+      PATH=$PATH:/tmp/aws
+    fi
+
+    # Loop over list of models
+    for model_full_path in $@
+    do
+      model_name=${model_full_path##*/}
+      model_name=${model_name//:/_}
+
+      model_path="/data/models/${model_name}"
+
+      # Download model from S3
+      if [ "$download_models" = true ]; then
+        s3_model_path="s3://{{ .Values.awsCredentials.bucketName }}/{{ template "model_version" $root }}/{{ .Values.cacheConfig.gpuProduct }}/models/${model_name}"
+        if aws s3 ls $s3_model_path; then
+          time aws s3 sync $s3_model_path ${model_path} --no-progress
+        else
+          echo "Model not found $s3_model_path"
+          exit 1
+        fi
+      fi
+
+      # replace symlinks with file
+      for file in $(find $model_path -type l); do echo "Fixing symlink $file"; cp --remove-destination "$(realpath ${file})" ${file}; done
+      model_repos_to_load+=" --model-repository=$model_path"
+    done
+    tritonserver --cuda-memory-pool-byte-size=0:1000000000 ${model_repos_to_load} --allow-metrics=true --allow-gpu-metrics=true --allow-cpu-metrics=true --model-load-thread-count=8
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $group_name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ $group_name }}
+    chart: {{ template "riva-server.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+spec:
+  replicas: {{ $config.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ $group_name }}
+      release: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ $group_name }}
+        release: {{ .Release.Name }}
+
+    spec:
+      {{- if .Values.persistentVolumeClaim.usePVC }}
+      securityContext:
+        fsGroup: 1000
+        runAsGroup: 1000
+        runAsUser: 1000
+      {{- end }}
+      {{- if ne .Values.cacheConfig.cacheMode "Disabled" }}
+      nodeSelector:
+        nvidia.com/gpu.product: {{ .Values.cacheConfig.gpuProduct }}
+      {{- end }}
+      containers:
+        - name: triton
+          image: {{ template "server_image" . }}
+          imagePullPolicy: {{ .Values.riva.pullPolicy }}
+          {{- if not .Values.riva.visibleGpus }}
+          resources:
+            limits:
+              nvidia.com/gpu: {{ .Values.riva.numGpus }}
+          {{- end }}
+
+          command: ["/etc/run-triton.sh"]
+
+          args:
+            {{- range $model := $model_list }}
+            - {{ $model }}
+            {{- end }}
+
+          env:
+            - name: TRTIS_MODEL_STORE
+              value: "/data/models"
+            - name: LD_PRELOAD
+              value: "{{- join ":" .Values.riva.trtPlugins }}"
+            {{- if .Values.riva.visibleGpus }}
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: {{ .Values.riva.visibleGpus | quote }}
+            {{- end }}
+
+          {{- if eq .Values.cacheConfig.cacheMode "ReadOnly" }}
+          envFrom:
+            - secretRef:
+                name: {{ .Values.awsCredentials.secretReadOnlyName }}
+          {{- end }}
+
+          ports:
+            - containerPort: 8000
+              name: http
+            - containerPort: 8001
+              name: grpc
+            - containerPort: 8002
+              name: metrics
+          readinessProbe:
+            httpGet:
+              path: /v2/health/ready
+              port: http
+            initialDelaySeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /v2/health/live
+              port: http
+            initialDelaySeconds: 10
+          startupProbe:
+            httpGet:
+              path: /v2/health/ready
+              port: http
+            initialDelaySeconds: 60
+            failureThreshold: 10
+            periodSeconds: 60
+          volumeMounts:
+          {{- if or (eq .Values.cacheConfig.cacheMode "Disabled") (eq .Values.cacheConfig.cacheMode "ReadWrite") }}
+            - mountPath: /data/
+              name: workdir
+          {{- end }}
+            - mountPath: /dev/shm
+              name: shm
+            - mountPath: /etc/run-triton.sh
+              name: configmap-{{ $group_name }}
+              subPath: run-triton.sh
+              readOnly: true
+
+        {{- if eq .Values.cacheConfig.cacheMode "ReadWrite" }}
+        - name: riva-model-upload
+          image: {{ template "server_image" . }}
+          command: ["/bin/bash", "-c"]
+          args: ["/etc/wait-for-triton.sh localhost:8000 && /etc/upload-models.sh && sleep infinity"]
+
+          volumeMounts:
+            - name: workdir
+              mountPath: /data/
+            - mountPath: /etc/wait-for-triton.sh
+              name: configmap-{{ template "riva-server.fullname" . }}
+              subPath: wait-for-triton.sh
+              readOnly: true
+            - mountPath: /etc/upload-models.sh
+              name: configmap-{{ $group_name }}
+              subPath: upload-models.sh
+              readOnly: true
+          env:
+            - name: TRITON_TIMEOUT_SEC
+              value: {{ quote .Values.modelRepoGenerator.tritonTimeoutSeconds }}
+          envFrom:
+            - secretRef:
+                name: {{ .Values.awsCredentials.secretReadWriteName }}
+        {{- end }}
+
+      imagePullSecrets:
+        - name: {{ .Values.modelRepoGenerator.imagePullSecret }}
+
+      {{- if (ne (len .Values.modelRepoGenerator.ngcModelConfigs) 0) }}
+      initContainers:
+        {{- if .Values.compatGpuCheckTimeout }}
+        - name: riva-gpu-check
+          image: {{ template "servicemaker_image" . }}
+          imagePullPolicy: {{ .Values.modelRepoGenerator.pullPolicy }}
+          command: [sh]
+          args: [-c, "timeout $GPU_CHECK_TIMEOUT bash -c 'until ( nvidia-smi > /dev/null ) ;do sleep 10; echo Checking GPU visibility... ;done;echo GPU found'"]
+          env:
+            - name: GPU_CHECK_TIMEOUT
+              value: {{ .Values.compatGpuCheckTimeout }}
+          {{- if .Values.riva.visibleGpus }}
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: {{ .Values.riva.visibleGpus | quote }}
+          {{- end }}
+          {{- if not .Values.riva.visibleGpus }}
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+          {{- end }}
+        {{- end }}
+
+        {{- if eq .Values.cacheConfig.cacheMode "ReadWrite" }}
+        - name: riva-model-download
+          image: amazon/aws-cli
+          command: ["/etc/download-models.sh"]
+          args:
+            {{- range $model := $model_list }}
+            - {{ $model }}
+            {{- end }}
+          volumeMounts:
+            - name: workdir
+              mountPath: /data/
+            - mountPath: /etc/download-models.sh
+              name: configmap-{{ $group_name }}
+              subPath: download-models.sh
+              readOnly: true
+          envFrom:
+            - secretRef:
+                name: {{ .Values.awsCredentials.secretReadOnlyName }}
+        {{- end }}
+
+        {{- if or (eq .Values.cacheConfig.cacheMode "Disabled") (eq .Values.cacheConfig.cacheMode "ReadWrite") }}
+        - name: riva-model-init
+          image: {{ template "servicemaker_image" . }}
+          imagePullPolicy: {{ .Values.modelRepoGenerator.pullPolicy }}
+          {{- if not .Values.riva.visibleGpus }}
+          resources:
+            limits:
+              nvidia.com/gpu: {{ .Values.riva.numGpus }}
+          {{- end }}
+          volumeMounts:
+            - name: workdir
+              mountPath: /data/
+            - mountPath: /dev/shm
+              name: shm
+            - mountPath: /etc/download-and-deploy-models.sh
+              name: configmap-{{ $group_name }}
+              subPath: download-and-deploy-models.sh
+              readOnly: true
+
+          command: ["/etc/download-and-deploy-models.sh"]
+          args:
+            {{- range $model := $model_list }}
+            - {{ $model }}
+            {{- end }}
+          env:
+            - name: NGC_CLI_ORG
+              value: "nvidia"
+            - name: NGC_CLI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.modelRepoGenerator.ngcSecret }}
+                  key: {{ .Values.modelRepoGenerator.ngcSecretKey }}
+            - name: MODEL_DEPLOY_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.modelRepoGenerator.modelDeploySecret }}
+                  key: key
+            {{- if .Values.riva.visibleGpus }}
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: {{ .Values.riva.visibleGpus | quote }}
+            {{- end }}
+          # For reading RMIRs from S3
+          {{- if .Values.awsCredentials.accessKeyIdRO }}
+          envFrom:
+            - secretRef:
+                name: {{ .Values.awsCredentials.secretReadOnlyName }}
+          {{- end }}
+        {{- end }}
+      {{- end }}
+
+      volumes:
+        - name: shm
+          emptyDir:
+            medium: Memory
+        {{- if or (eq .Values.cacheConfig.cacheMode "Disabled") (eq .Values.cacheConfig.cacheMode "ReadWrite") }}
+        - name: workdir
+          {{- if .Values.persistentVolumeClaim.usePVC }}
+          persistentVolumeClaim:
+            claimName: {{ $group_name }}
+          {{- else}}
+          {{- if .Values.modelRepoGenerator.modelDeployVolume }}
+          hostPath:
+            type: DirectoryOrCreate
+            path: {{ .Values.modelRepoGenerator.modelDeployVolume.hostPath.path }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+          {{- end}}
+        {{- end }}
+        - name: configmap-{{ template "riva-server.fullname" . }}
+          configMap:
+            name: configmap-{{ template "riva-server.fullname" . }}
+            defaultMode: 0777
+        - name: configmap-{{ $group_name }}
+          configMap:
+            name: configmap-{{ $group_name }}
+            defaultMode: 0777
+
+---
+
+
+{{- if .Values.riva.useAutoscaling }}
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: hpa-{{ $group_name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ $group_name }}
+    chart: {{ template "riva-server.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ $group_name }}
+  minReplicas: 1
+  maxReplicas: 2
+  metrics:
+    - type: Pods
+      pods:
+        metric:
+          name: avg_time_queue_us
+        target:
+          type: AverageValue
+          averageValue: 20000
+
+---
+{{- end }}
+
+
+{{- if or (eq .Values.cacheConfig.cacheMode "Disabled") (eq .Values.cacheConfig.cacheMode "ReadWrite") }}
+{{- if .Values.persistentVolumeClaim.usePVC }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $group_name }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+  {{- if .Values.persistentVolumeClaim.keepPVC }}
+    "helm.sh/resource-policy": keep
+  {{- end }}
+  labels:
+    name: {{ $group_name }}
+spec:
+{{- if .Values.persistentVolumeClaim.storageClassName }}
+  storageClassName: {{ .Values.persistentVolumeClaim.storageClassName }}
+{{- end }}
+  accessModes:
+  - {{ .Values.persistentVolumeClaim.storageAccessMode | default "ReadWriteOnce" }}
+  resources:
+    requests:
+      storage: {{ .Values.persistentVolumeClaim.storageSize | default "50Mi" }}
+---
+{{- end }}
+{{- end }}
+
+
+{{- end }}
+{{- end }}
+{{- end }}

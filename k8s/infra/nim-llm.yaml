@@ -1,0 +1,33 @@
+apiVersion: apps.nvidia.com/v1alpha1
+kind: NIMService
+metadata:
+  name: meta-llama3-8b-instruct
+  namespace: voice-workflow
+spec:
+  image:
+    repository: nvcr.io/nim/meta/llama-3.1-8b-instruct
+    tag: "1.3.3"
+    pullPolicy: IfNotPresent
+    pullSecrets:
+      - nvcrimagepullsecret
+  
+  authSecret: ngc-api
+  
+  replicas: 1
+  
+  resources:
+    limits:
+      nvidia.com/gpu: 1
+  
+  storage:
+    pvc:
+      name: nim-cache-pvc
+      
+  env:
+    - name: NIM_CACHE_PATH
+      value: /opt/nim/.cache
+
+  expose:
+    service:
+      type: ClusterIP
+      port: 8000

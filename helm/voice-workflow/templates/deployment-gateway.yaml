@@ -1,5 +1,26 @@
-# TODO: Define Deployment for Voice Gateway
-# apiVersion: apps/v1
-# kind: Deployment
-# ...
-
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-gateway
+spec:
+  replicas: {{ .Values.gateway.replicas }}
+  selector:
+    matchLabels:
+      app: voice-gateway
+  template:
+    metadata:
+      labels:
+        app: voice-gateway
+    spec:
+      containers:
+        - name: gateway
+          image: {{ .Values.gateway.image }}
+          imagePullPolicy: {{ .Values.gateway.imagePullPolicy }}
+          ports:
+            - containerPort: 50051
+          env:
+            - name: RIVA_URI
+              value: "{{ .Release.Name }}{{ .Values.gateway.env.rivaUrlSuffix }}"
+            - name: LLM_SERVICE_URL
+              value: "http://{{ .Release.Name }}{{ .Values.gateway.env.nimUrlSuffix }}"
+            # Add config for Riva SSL if needed

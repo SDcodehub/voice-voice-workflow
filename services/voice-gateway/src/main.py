@@ -1,48 +1,163 @@
 import asyncio
 import logging
 import grpc
+import os
+import riva.client
 from concurrent import futures
+from typing import AsyncGenerator
 
 # Generated proto imports
 import voice_workflow_pb2
 import voice_workflow_pb2_grpc
+
+from clients.asr import ASRClient
+from clients.llm import LLMClient
+from clients.tts import TTSClient
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class VoiceGatewayServicer(voice_workflow_pb2_grpc.VoiceGatewayServicer):
     """Implementation of the Voice Gateway Service."""
-    
+
+    def __init__(self):
+        # Load configuration from environment variables
+        self.riva_uri = os.getenv("RIVA_URI", "localhost:50051")
+        self.nim_url = os.getenv("LLM_SERVICE_URL", "http://localhost:8000/v1")
+        
+        logger.info(f"Connecting to Riva at {self.riva_uri}")
+        logger.info(f"Connecting to NIM at {self.nim_url}")
+
+        # Initialize Riva Auth
+        # In production, might need SSL options
+        self.auth = riva.client.Auth(uri=self.riva_uri)
+
+        # Initialize Clients
+        self.asr_client = ASRClient(auth=self.auth)
+        self.llm_client = LLMClient(base_url=self.nim_url)
+        self.tts_client = TTSClient(auth=self.auth)
+
     async def StreamAudio(self, request_iterator, context):
         """
         Bidirectional streaming RPC.
-        Receives audio/config from client.
-        Sends ASR/LLM/TTS results back to client.
         """
-        async for request in request_iterator:
-            # TODO: logic to route audio to ASR, text to LLM, etc.
-            if request.HasField('config'):
-                logger.info(f"Received config: {request.config}")
+        # Queue to decouple input request stream from processing logic
+        # We can also just use an async generator adapter.
+        
+        # We need a way to pass audio chunks to ASR. 
+        # Since ASRClient takes an async generator, we can create one that yields from request_iterator.
+        # BUT, request_iterator also contains Config and Text.
+        
+        input_queue = asyncio.Queue()
+        
+        async def input_processor():
+            """Reads from gRPC stream and pushes to input_queue."""
+            try:
+                async for request in request_iterator:
+                    await input_queue.put(request)
+            finally:
+                await input_queue.put(None) # Sentinel
+
+        # Start input processing in background
+        input_task = asyncio.create_task(input_processor())
+
+        try:
+            # 1. Wait for Config (first message)
+            first_msg = await input_queue.get()
+            if not first_msg or not first_msg.HasField('config'):
+                logger.warning("First message was not config.")
+                # We can proceed or error out. Proceeding for robustness.
+            else:
+                logger.info(f"Session started: {first_msg.config}")
                 yield voice_workflow_pb2.ServerMessage(
                     event=voice_workflow_pb2.ServerEvent(
                         type=voice_workflow_pb2.LISTENING,
-                        message="Session started"
+                        message="Ready"
                     )
                 )
-            elif request.HasField('audio_chunk'):
-                # logger.debug(f"Received audio chunk of size {len(request.audio_chunk)}")
-                # For now, just acknowledge receiving audio
-                pass
-            elif request.HasField('text_input'):
-                logger.info(f"Received text: {request.text_input}")
+
+            # 2. Define audio source generator for ASR
+            async def audio_source_gen():
+                # If the first message wasn't config and was audio, yield it
+                if first_msg and first_msg.HasField('audio_chunk'):
+                    yield first_msg.audio_chunk
                 
+                while True:
+                    msg = await input_queue.get()
+                    if msg is None:
+                        break
+                    if msg.HasField('audio_chunk'):
+                        yield msg.audio_chunk
+                    elif msg.HasField('text_input'):
+                        # TODO: Handle text input (bypass ASR)
+                        # For now, we focus on voice-to-voice
+                        pass
             
-        # End of stream
-        yield voice_workflow_pb2.ServerMessage(
-            event=voice_workflow_pb2.ServerEvent(
-                type=voice_workflow_pb2.END_OF_TURN
+            # 3. Process Pipeline: ASR -> LLM -> TTS
+            # We iterate over ASR results. This drives the whole loop.
+            
+            asr_stream = self.asr_client.transcribe_stream(audio_source_gen())
+            
+            async for transcript, is_final in asr_stream:
+                if not is_final:
+                    # Send interim transcript
+                    yield voice_workflow_pb2.ServerMessage(transcript_chunk=transcript)
+                else:
+                    logger.info(f"Final ASR: {transcript}")
+                    yield voice_workflow_pb2.ServerMessage(transcript_chunk=transcript)
+                    yield voice_workflow_pb2.ServerMessage(
+                        event=voice_workflow_pb2.ServerEvent(type=voice_workflow_pb2.PROCESSING)
+                    )
+
+                    # Send to LLM
+                    llm_stream = self.llm_client.generate_response(transcript)
+                    
+                    # Buffer for TTS
+                    sentence_buffer = ""
+                    
+                    async for text_chunk in llm_stream:
+                        yield voice_workflow_pb2.ServerMessage(llm_response_chunk=text_chunk)
+                        
+                        sentence_buffer += text_chunk
+                        # Simple sentence splitting
+                        if any(p in text_chunk for p in ['.', '?', '!', '।', '\n']):
+                            # Speak what we have
+                            to_speak = sentence_buffer.strip()
+                            if to_speak:
+                                yield voice_workflow_pb2.ServerMessage(
+                                    event=voice_workflow_pb2.ServerEvent(type=voice_workflow_pb2.SPEAKING)
+                                )
+                                logger.info(f"Speaking: {to_speak}")
+                                tts_stream = self.tts_client.synthesize_stream(to_speak)
+                                async for audio_chunk in tts_stream:
+                                    yield voice_workflow_pb2.ServerMessage(audio_chunk=audio_chunk)
+                            sentence_buffer = ""
+                    
+                    # Process remaining buffer
+                    if sentence_buffer.strip():
+                        to_speak = sentence_buffer.strip()
+                        logger.info(f"Speaking (Final): {to_speak}")
+                        tts_stream = self.tts_client.synthesize_stream(to_speak)
+                        async for audio_chunk in tts_stream:
+                            yield voice_workflow_pb2.ServerMessage(audio_chunk=audio_chunk)
+
+                    yield voice_workflow_pb2.ServerMessage(
+                        event=voice_workflow_pb2.ServerEvent(type=voice_workflow_pb2.LISTENING)
+                    )
+
+        except Exception as e:
+            logger.error(f"Error in StreamAudio: {e}", exc_info=True)
+            yield voice_workflow_pb2.ServerMessage(
+                event=voice_workflow_pb2.ServerEvent(
+                    type=voice_workflow_pb2.ERROR,
+                    message=str(e)
+                )
             )
-        )
+        finally:
+            input_task.cancel()
+            yield voice_workflow_pb2.ServerMessage(
+                event=voice_workflow_pb2.ServerEvent(type=voice_workflow_pb2.END_OF_TURN)
+            )
 
 async def serve():
     port = '50051'

@@ -1,0 +1,64 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: voice-workflow
+---
+# 1. PV for NIM LLM Cache
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nim-voice-pv
+spec:
+  capacity:
+    storage: 100Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-storage
+  local:
+    path: /mnt/nim-models/voice-workflow
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - node001
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nim-cache-pvc
+  namespace: voice-workflow
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-storage
+  resources:
+    requests:
+      storage: 100Gi
+  volumeName: nim-voice-pv
+---
+# 2. PV for Riva Model Cache
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: riva-voice-pv
+spec:
+  capacity:
+    storage: 100Gi # Riva needs plenty of space for optimized models
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-storage
+  local:
+    path: /mnt/riva-models/voice-workflow
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - node001

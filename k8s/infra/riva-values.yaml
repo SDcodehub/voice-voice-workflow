@@ -1,0 +1,45 @@
+# Riva Server Configuration for Hindi
+# Helm values for nvidia/riva-api chart
+
+# 1. Model Configuration
+modelRepoGenerator:
+  # Pulls optimized models from NGC. 
+  ngcModelConfigs:
+    # Disable the default config from values.yaml
+    triton0:
+      enabled: false
+
+    # The key name (e.g. tritonGroup0) defines the Triton service group
+    tritonGroup0:
+      enabled: true
+      replicaCount: 1
+      models:
+      # English ASR (Parakeet - Optimized for accuracy/speed)
+      - nvidia/riva/rmir_asr_parakeet_0-6b_en_us_str_thr:2.17.0
+      # English TTS (FastPitch + HiFiGAN)
+      - nvidia/riva/rmir_tts_fastpitch_hifigan_en_us_ipa:2.17.0
+      
+      # TO ENABLE HINDI LATER, COMMENT ABOVE AND UNCOMMENT BELOW:
+      # - nvidia/riva/rmir_asr_hindi_in_conformer_unified:2.17.0
+      # - nvidia/riva/rmir_tts_fastpitch_hifigan_hindi_in_ipa:2.17.0
+  
+  # Deploy to the same node to reuse cache if possible
+  modelDeployVolume:
+    storageClass: local-storage
+    size: 50Gi
+
+# 2. Service Exposure
+service:
+  type: ClusterIP
+  grpcPort: 50051
+
+# 3. Resources
+resources:
+  limits:
+    nvidia.com/gpu: 1
+
+# 4. Storage (Model Cache)
+persistentVolumeClaim:
+  usePVC: true
+  storageClassName: local-storage
+  size: 50Gi

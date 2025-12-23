@@ -1,0 +1,23 @@
+{{- if .Values.nim.enabled }}
+apiVersion: apps.nvidia.com/v1alpha1
+kind: NIMService
+metadata:
+  name: {{ .Release.Name }}-nim
+spec:
+  image: {{ .Values.nim.image }}
+  replicas: {{ .Values.nim.replicas }}
+  resources:
+    limits:
+      nvidia.com/gpu: {{ index .Values.nim.resources.limits "nvidia.com/gpu" }}
+  env:
+    - name: NGC_API_KEY
+      valueFrom:
+        secretKeyRef:
+          name: {{ .Values.global.ngcSecret }}
+          key: NGC_API_KEY
+  expose:
+    service:
+      type: ClusterIP
+      port: 8000
+{{- end }}
+

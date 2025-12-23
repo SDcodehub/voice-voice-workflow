@@ -9,6 +9,8 @@ dependencies = [
     "grpcio>=1.76.0",
     "grpcio-tools>=1.76.0",
     "numpy>=2.2.6",
+    "nvidia-riva-client>=2.16.0",
+    "openai>=2.14.0",
     "protobuf>=6.33.2",
     "python-dotenv>=1.2.1",
 ]

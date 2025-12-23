@@ -1,17 +1,36 @@
+# Global Config
+global:
+  ngcSecret: "ngc-secret" # Secret containing NGC API Key
+
+# Gateway Service (Our Python Code)
 gateway:
   image: voice-gateway:latest
+  imagePullPolicy: IfNotPresent
   replicas: 1
-  port: 50051
+  service:
+    type: ClusterIP
+    port: 50051
+  env:
+    # URL will be constructed from release name
+    # e.g. voice-demo-riva-server:50051
+    rivaUrlSuffix: "-riva-server:50051"
+    nimUrlSuffix: "-nim:8000/v1"
 
-asr:
+# External Dependency: NVIDIA Riva (ASR/TTS)
+riva:
   enabled: true
-  model: "hindi"
+  ngcSecret: "ngc-secret"
+  service:
+    type: ClusterIP
+  modelRepoGenerator:
+    modelDeployKey: "tlt_encode"
+    ngcSecret: "ngc-secret"
 
-tts:
+# External Dependency: NVIDIA NIM (LLM)
+nim:
   enabled: true
-  model: "hindi"
-
-llm:
-  enabled: true
-  model: "llama-2-70b-chat" # Example
-
+  image: nvcr.io/nim/meta/llama3-8b-instruct:latest
+  replicas: 1
+  resources:
+    limits:
+      nvidia.com/gpu: 1

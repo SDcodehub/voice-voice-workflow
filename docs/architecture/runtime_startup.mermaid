@@ -1,0 +1,27 @@
+sequenceDiagram
+    participant K8s
+    participant GPU as GPU Nodes
+    participant Riva as Riva Service (ASR/TTS)
+    participant NIM as NIM Service (LLM)
+    participant GW as Voice Gateway
+
+    Note over K8s: Phase 3: Deployment (Helm Install)
+
+    par Deploy Models
+        K8s->>Riva: Schedule Pod
+        Riva->>GPU: Alloc GPU
+        Riva->>Riva: Download/Load Models (Heavy)
+        
+        K8s->>NIM: Schedule Pod
+        NIM->>GPU: Alloc GPU
+        NIM->>NIM: Download/Load Model (Heavy)
+    end
+
+    Note right of K8s: Gateway waits for Services
+
+    K8s->>GW: Schedule Pod
+    GW->>Riva: Connect (gRPC)
+    GW->>NIM: Connect (HTTP/gRPC)
+    
+    Note over GW: Traffic Starts
+

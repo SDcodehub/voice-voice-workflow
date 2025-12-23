@@ -1,24 +1,26 @@
 # Voice-to-Voice Hindi Workflow - High Level Plan
 
-## Phase 1: Architecture & Design (Current)
+## Phase 1: Architecture & Design (✅ Done)
 - [x] Define High-Level Architecture
-- [ ] Define API Interfaces (Protobuf definitions for gRPC)
-- [ ] Select specific Models (Riva Hindi models, LLM choice)
+- [x] Define API Interfaces (Protobuf definitions)
 
-## Phase 2: Core Components Implementation (Proof of Concept)
-- [ ] **ASR Service Setup**: Deploy NVIDIA Riva ASR with Hindi model on K8s (or mock for dev).
-- [ ] **TTS Service Setup**: Deploy NVIDIA Riva TTS with Hindi model on K8s.
-- [ ] **LLM Integration**: Set up a simple LLM connector (could be external API initially or local NIM).
-- [ ] **Voice Gateway (Orchestrator)**:
-    - Implement basic bi-directional streaming.
-    - Handle ASR -> LLM -> TTS chaining.
-    - Basic interruptibility (optional for POC).
+## Phase 2: Core Components Implementation (✅ Done)
+- [x] **Gateway Skeleton**: Basic gRPC server.
+- [x] **ASR Integration**: Riva Client connected.
+- [x] **LLM Integration**: NIM (OpenAI) Client connected.
+- [x] **TTS Integration**: Riva Client connected.
+- [x] **End-to-End Logic**: Pipeline wired and tested.
 
-## Phase 3: Kubernetes Deployment & Infrastructure
-- [ ] Create Helm Charts for each component.
-- [ ] Configure Ingress for WebSocket/gRPC support.
-- [ ] Resource management (GPU requests/limits).
-- [ ] Service Discovery setup.
+## Phase 3: Kubernetes Deployment & Infrastructure (🚀 Current)
+### 3.1: AI Infrastructure (Layer 2)
+- [ ] **NIM Operator Setup**: Ensure Operator is running.
+- [ ] **Deploy LLM NIM**: Apply `k8s/infra/nim-llm.yaml`.
+- [ ] **Deploy Riva**: Install Riva Chart with `k8s/infra/riva-values.yaml`.
+
+### 3.2: Application Deployment (Layer 3)
+- [ ] **Containerize Gateway**: Build Docker image.
+- [ ] **Gateway Helm Chart**: Complete `helm/voice-workflow`.
+- [ ] **Deploy Gateway**: Install chart connecting to Layer 2 services.
 
 ## Phase 4: Optimization & Scalability
 - [ ] Implement Low Latency optimizations (streaming improvements).
@@ -29,12 +31,3 @@
 - [ ] Logging & Monitoring (Prometheus/Grafana/OTEL).
 - [ ] Security (TLS, Auth).
 - [ ] CI/CD Pipelines.
-
----
-
-## Technical Stack
-- **Orchestrator**: Python (FastAPI/AsyncIO) or Go.
-- **Protocol**: gRPC (Internal), WebSocket (Client-Gateway).
-- **AI Engine**: NVIDIA Riva (ASR/TTS), NVIDIA NIM (LLM).
-- **Infra**: Kubernetes, Helm.
-

@@ -1,0 +1,65 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: configmap-test
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ template "riva-server.name" . }}
+    chart: {{ template "riva-server.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+data:
+  test-riva.sh: |
+    #!/bin/bash
+    set -x
+    RIVA_URI_ARG="--riva_uri $RIVA_API_SERVICE_HOST:$RIVA_API_SERVICE_PORT_RIVA_SPEECH"
+    riva_streaming_asr_client --audio_file /opt/riva/wav/en-US_sample.wav --language_code en-US $RIVA_URI_ARG
+    cat final_transcripts.json | jq .text | grep Processing?
+    riva_tts_client --text="This is a test for validating helm deployment of Riva TTS" --language=en-US --audio_file=tts_output.wav $RIVA_URI_ARG
+    riva_streaming_asr_client --audio_file tts_output.wav $RIVA_URI_ARG
+    cat final_transcripts.json | jq .text | grep -i deployment
+
+---
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-{{ template "riva-server.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ template "riva-server.name" . }}
+    chart: {{ template "riva-server.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+  annotations:
+    "helm.sh/hook": test
+spec:
+  containers:
+    - name: test-riva-speech-api
+      image: {{ template "server_image" . }}
+      securityContext:
+        runAsGroup: 1000
+        runAsUser: 1000
+      volumeMounts:
+      - mountPath: /etc/test-riva.sh
+        name: configmap-test
+        subPath: test-riva.sh
+        readOnly: true
+      command: ["/etc/test-riva.sh"]
+      livenessProbe:
+        exec:
+          command:
+          - touch
+          - /tmp/healthy
+      readinessProbe:
+        exec:
+          command:
+          - touch
+          - /tmp/healthy
+  volumes:
+    - name: configmap-test
+      configMap:
+        name: configmap-test
+        defaultMode: 0777
+  restartPolicy: Never
+

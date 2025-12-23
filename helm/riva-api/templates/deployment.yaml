@@ -1,0 +1,143 @@
+# Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+#  * Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#  * Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the distribution.
+#  * Neither the name of NVIDIA CORPORATION nor the names of its
+#    contributors may be used to endorse or promote products derived
+#    from this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
+# EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+# PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+# CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+# EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+# PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+# OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+{{- $root := . }}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ template "riva-server.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ template "riva-server.name" . }}
+    chart: {{ template "riva-server.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ template "riva-server.name" . }}
+      release: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ template "riva-server.name" . }}
+        release: {{ .Release.Name }}
+
+    spec:
+      {{- if .Values.persistentVolumeClaim.usePVC }}
+      securityContext:
+        runAsGroup: 1000
+        runAsUser: 1000
+      {{- end }}
+      containers:
+        - name: riva-speech-api
+          image: {{ template "server_image" . }}
+          imagePullPolicy: {{ .Values.riva.pullPolicy }}
+
+          command: ["/etc/start-riva-with-multiple-triton.sh"]
+
+          args:
+            - "--asr_service=true"
+            - "--nlp_service=true"
+            - "--nmt_service=true"
+            - "--tts_service=true"
+            - "--triton_uri={{ include "joinListWithComma" (dict "root" .Values.modelRepoGenerator.ngcModelConfigs "prefix" "" "suffix" ":8001") }}"
+          env:
+            {{- if .Values.rivaEnterprise.enabled }}
+            - name: RIVA_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.rivaEnterprise.ngcSecret}}
+                  key: apikey
+            - name: RIVA_API_NGC_ORG
+              value: {{ .Values.rivaEnterprise.ngcOrg }}
+            - name: RIVA_EULA
+              value: {{- if .Values.rivaEnterprise.acceptEula}}"accept"{{- else }}"decline"{{- end }}
+            {{- end }}
+
+          ports:
+            - containerPort: 50051
+              name: speech-grpc
+
+          readinessProbe:
+            exec:
+              command: ["/bin/grpc_health_probe", "-addr=:50051"]
+            initialDelaySeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            exec:
+              command: ["/bin/grpc_health_probe", "-addr=:50051"]
+            initialDelaySeconds: 10
+            failureThreshold: 12
+            periodSeconds: 10
+          startupProbe:
+            exec:
+              command: ["/bin/grpc_health_probe", "-addr=:50051"]
+            initialDelaySeconds: 10
+            failureThreshold: 12
+            periodSeconds: 10
+          volumeMounts:
+            - mountPath: /dev/shm
+              name: shm
+            - mountPath: /etc/start-riva-with-multiple-triton.sh
+              name: configmap-{{ template "riva-server.fullname" . }}
+              subPath: start-riva-with-multiple-triton.sh
+              readOnly: true
+
+      imagePullSecrets:
+        - name: {{ .Values.modelRepoGenerator.imagePullSecret }}
+
+      {{- if (ne (len .Values.modelRepoGenerator.ngcModelConfigs) 0) }}
+      initContainers:
+        - name: riva-model-init
+          image: {{ template "servicemaker_image" . }}
+          imagePullPolicy: {{ .Values.modelRepoGenerator.pullPolicy }}
+          volumeMounts:
+            - mountPath: /etc/wait-for-triton.sh
+              name: configmap-{{ template "riva-server.fullname" . }}
+              subPath: wait-for-triton.sh
+              readOnly: true
+
+          command: ["/etc/wait-for-triton.sh"]
+          args:
+            - "{{ include "joinListWithComma" (dict "root" .Values.modelRepoGenerator.ngcModelConfigs "prefix" "" "suffix" ":8000") }}"
+
+          env:
+            - name: TRITON_TIMEOUT_SEC
+              value: {{ quote .Values.modelRepoGenerator.tritonTimeoutSeconds }}
+      {{- end }}
+
+      volumes:
+        - name: shm
+          emptyDir:
+            medium: Memory
+        - name: configmap-{{ template "riva-server.fullname" . }}
+          configMap:
+            name: configmap-{{ template "riva-server.fullname" . }}
+            defaultMode: 0777
+

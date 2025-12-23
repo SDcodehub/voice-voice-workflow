@@ -1,0 +1,86 @@
+# Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+#  * Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#  * Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the distribution.
+#  * Neither the name of NVIDIA CORPORATION nor the names of its
+#    contributors may be used to endorse or promote products derived
+#    from this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
+# EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+# PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+# CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+# EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+# PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+# OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: configmap-{{ template "riva-server.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ template "riva-server.name" . }}
+    chart: {{ template "riva-server.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+data:
+  start-riva-with-multiple-triton.sh: |
+    #!/bin/bash
+    ngc_args=""
+    if [[ -n "$RIVA_API_KEY" ]]; then
+      ngc_args="--api_key $RIVA_API_KEY --eula=$RIVA_EULA --org=$RIVA_API_NGC_ORG"
+    fi
+
+    # start up riva
+    riva_server $ngc_args $@
+
+  wait-for-triton.sh: |
+    #!/bin/bash
+    if [[ -z $1 ]]
+    then
+        echo "  > No Triton servers available. Terminating Riva startup."
+        exit 1
+    fi
+
+    block_until_server_alive() {
+        # while process is running, check to see if it's alive and healthy
+        #Timeout after 30 minutes
+        timeout=$TRITON_TIMEOUT_SEC
+        count=0
+        while true; do
+            rv_http=$(curl -s -o /dev/null -w "%{http_code}" http://${1}/v2/health/ready)
+            if [ $rv_http -ne 200 ]; then
+                echo "  > Riva waiting for Triton server ${1} to load all models...retrying in 5 second"
+                sleep 5
+            else
+                echo "  > Triton server ${1} is ready..."
+                return
+            fi
+            if [ $count -eq $timeout ]; then
+              echo "  > Triton server ${1} timed out. Try increasing TRITON_TIMEOUT_SEC value in case you are loading multiple models."
+              break
+            fi
+            ((count=count+5))
+        done
+        echo "  > Terminating Riva startup."
+        exit 1
+    }
+
+    for triton_uri in ${1//,/ }
+    do
+        # call your procedure/other scripts here below
+        block_until_server_alive $triton_uri
+    done
+
+
