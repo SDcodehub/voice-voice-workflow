@@ -1,7 +1,7 @@
-# Voice-to-Voice Hindi Workflow - Implementation Status
+# Voice-to-Voice Workflow - Implementation Status
 
 ## Project Overview
-This project implements a scalable, low-latency Voice-to-Voice AI pipeline for Hindi using NVIDIA Riva and NIMs on Kubernetes. It follows a "Central Gateway" architecture with gRPC streaming.
+This project implements a scalable, low-latency Voice-to-Voice AI pipeline using NVIDIA Riva and NIMs on Kubernetes. It follows a "Central Gateway" architecture with gRPC streaming.
 
 ### Core Philosophy
 1.  **Central Orchestrator (Gateway)**: A single entry point (Gateway) manages the complexity. Clients don't talk to ASR/TTS directly. This allows us to handle state (interruption, turn-taking) on the server side.
@@ -9,7 +9,8 @@ This project implements a scalable, low-latency Voice-to-Voice AI pipeline for H
 3.  **Strict Contracts**: We use Protobuf (`.proto`) to define exact data structures before writing code.
 4.  **Modern Python**: We use `uv` for dependency management and `asyncio` for high-concurrency handling in the Gateway.
 
-## Current Progress (Phase 3: Kubernetes Deployment)
+## Current Progress (Phase 3: Kubernetes Deployment) ✅ COMPLETE
+
 - [x] **Architecture**: Defined in `docs/architecture` and `proto/`.
 - [x] **Gateway Skeleton**: Basic gRPC server set up in `services/voice-gateway`.
 - [x] **ASR/TTS Integration**: Wired up in Gateway.
@@ -17,14 +18,22 @@ This project implements a scalable, low-latency Voice-to-Voice AI pipeline for H
     - [x] **Storage**: `local-storage` PV/PVCs configured and bound on `node001`.
     - [x] **Secrets**: Automated secret creation (`ngc-api`, `modelpullsecret`, `riva-model-deploy-key`) via `deploy_riva.sh`.
     - [x] **Riva Deployment**: Riva Server deployed via Helm and verified.
-        - **Status**: Running.
+        - **ASR Model**: `parakeet-0.6b-en-US-asr-streaming-throughput`
+        - **TTS Model**: `fastpitch_hifigan_ensemble-English-US`
         - **Health Check**: `HTTP 200 OK` on `/v2/health/ready`.
-    - [x] **LLM NIM**: NIM (Llama 3 8B) deployed and running.
+    - [x] **LLM NIM**: NIM (Llama 3.1 8B Instruct) deployed and running.
+        - **Model**: `meta/llama-3.1-8b-instruct`
 - [x] **Gateway Deployment**:
     - [x] **Container**: Image built and pushed to `docker.io/sagdesai/voice-gateway`.
     - [x] **Helm**: Chart updated to connect to existing Riva and NIM services.
     - [x] **Deploy**: Gateway pod deployed (`voice-gateway` release).
-    - [x] **E2E Test**: Verified connectivity and basic flow using internal test client.
+    - [x] **E2E Test**: ✅ **FULLY VERIFIED** - Voice-to-Voice working from Mac client!
+
+### E2E Test Results (2025-12-23)
+- **ASR**: Streaming transcription working (en-US, 16kHz)
+- **LLM**: Llama 3.1 8B responding with streaming text
+- **TTS**: Audio synthesis and playback working on Mac speakers
+- **Client**: Mac microphone → Server → Mac speakers pipeline complete
 
 ## Folder Structure Mapping
 
@@ -84,12 +93,57 @@ export NGC_API_KEY=...
 ```
 
 ### 4. Client Testing (Mac/Local)
-To test with your microphone:
-1.  **SSH Tunnel**: `ssh -L 50051:localhost:50051 sagdesai@10.41.88.111`
-2.  **Setup Client**: Download `services/voice-gateway/tests/setup_mac_client.sh` and run it.
-3.  **Run**: `uv run test_mic_client.py`
+
+**On the Server** (headnode):
+```bash
+# Start port-forward (bind to 0.0.0.0 for SSH tunnel access)
+kubectl port-forward -n voice-workflow svc/voice-gateway-gateway 50051:50051 --address 0.0.0.0
+```
+
+**On your Mac**:
+```bash
+# 1. SSH Tunnel to the server
+ssh -L 50051:localhost:50051 sagdesai@10.41.88.111
+
+# 2. In a new terminal, set up the client
+mkdir -p voice-client && cd voice-client
+
+# Copy required files from server
+scp sagdesai@10.41.88.111:~/voice-voice-workflow/proto/voice_workflow.proto .
+scp sagdesai@10.41.88.111:~/voice-voice-workflow/services/voice-gateway/tests/test_mic_client.py .
+
+# Initialize uv project and install dependencies
+uv init --app --no-workspace --name voice-client .
+uv add grpcio grpcio-tools pyaudio
+
+# Generate proto code
+uv run python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. voice_workflow.proto
+
+# 3. Run the client
+uv run test_mic_client.py
+```
+
+**Note**: If `pyaudio` fails to install, run: `brew install portaudio`
+
+## Technical Notes
+
+### Key Configuration Values
+| Component | Setting | Value |
+|-----------|---------|-------|
+| ASR | Language | `en-US` |
+| ASR | Sample Rate | `16000` Hz |
+| LLM | Model | `meta/llama-3.1-8b-instruct` |
+| TTS | Voice | Default (empty string) |
+| TTS | Sample Rate | `16000` Hz |
+
+### Fixes Applied (2025-12-23)
+1. **ASR Async Bug**: Fixed blocking `await` in executor that prevented streaming results
+2. **LLM Model Name**: Changed from `meta/llama3-8b-instruct` to `meta/llama-3.1-8b-instruct`
+3. **TTS Voice Name**: Changed from `en-US-Standard-A` to empty string (use default)
+4. **Port Forwarding**: Added `--address 0.0.0.0` for SSH tunnel access
 
 ## Next Immediate Steps (Phase 4: Optimization)
 1.  **Latency Tuning**: Measure E2E latency and optimize buffer sizes.
 2.  **Ingress**: Expose the gRPC gateway to the outside world using an Ingress Controller (Traefik/Nginx) with HTTP/2 support.
 3.  **Client**: Develop a web or CLI client to interact with the deployed gateway.
+4.  **Multi-language**: Add Hindi ASR/TTS models for Hindi voice workflow.
