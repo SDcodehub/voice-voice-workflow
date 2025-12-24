@@ -37,28 +37,75 @@ This project implements a scalable, low-latency Voice-to-Voice AI pipeline using
 
 Implemented Kubernetes best practices for production readiness:
 
-- [x] **Resource Management**
-    - [x] CPU/Memory requests and limits configured
-    - [x] Based on observed usage: ~1m CPU, ~56Mi memory at idle
-    - [x] Requests: `50m` CPU, `128Mi` memory
-    - [x] Limits: `500m` CPU, `512Mi` memory
+#### Resource Management
+- [x] CPU/Memory requests and limits configured
+- [x] Based on observed usage: ~1m CPU, ~56Mi memory at idle
+- [x] Requests: `50m` CPU, `128Mi` memory
+- [x] Limits: `500m` CPU, `512Mi` memory
 
-- [x] **Health Probes**
-    - [x] **Liveness Probe**: TCP socket check on gRPC port (restarts unhealthy pods)
-    - [x] **Readiness Probe**: TCP socket check on gRPC port (removes from service if not ready)
-    - [x] Configuration: `initialDelaySeconds: 15`, `periodSeconds: 30`
+#### Health Probes
+- [x] **Liveness Probe**: TCP socket check on gRPC port (restarts unhealthy pods)
+- [x] **Readiness Probe**: TCP socket check on gRPC port (removes from service if not ready)
+- [x] Configuration: `initialDelaySeconds: 15`, `periodSeconds: 30`
 
-- [x] **ConfigMap for Runtime Configuration**
-    - [x] Tunable parameters without container rebuild
-    - [x] ASR: language, sample rate
-    - [x] LLM: model, temperature, max tokens, system prompt
-    - [x] TTS: voice, sample rate
-    - [x] Usage: Edit `values.yaml` → `./scripts/deploy_gateway.sh`
+#### ConfigMap for Runtime Configuration
+- [x] Tunable parameters without container rebuild
+- [x] ASR: language, sample rate
+- [x] LLM: model, temperature, max tokens, system prompt
+- [x] TTS: voice, sample rate
+- [x] Usage: Edit `values.yaml` → `./scripts/deploy_gateway.sh`
 
-- [x] **Pod Disruption Budget (PDB)**
-    - [x] Protects against voluntary disruptions (node drains, cluster upgrades)
-    - [x] Configured with `minAvailable: 1`
-    - [x] Tested: Drain blocked with "Cannot evict pod as it would violate the pod's disruption budget"
+#### Pod Disruption Budget (PDB)
+- [x] Protects against voluntary disruptions (node drains, cluster upgrades)
+- [x] Configured with `minAvailable: 1`
+- [x] Tested: Drain blocked with "Cannot evict pod as it would violate the pod's disruption budget"
+
+### Phase 3.6: Security & Reliability ✅ COMPLETE (2025-12-24)
+
+#### Graceful Shutdown
+- [x] **Signal Handling**: SIGTERM/SIGINT handlers registered
+- [x] **Grace Period**: Configurable via `SHUTDOWN_GRACE_PERIOD` env var (default: 10s)
+- [x] **K8s Integration**: `terminationGracePeriodSeconds: 30` in deployment
+- [x] **Behavior**:
+  1. SIGTERM received (from K8s or Ctrl+C)
+  2. Server stops accepting NEW connections
+  3. Waits up to 10s for active requests to complete
+  4. Forcefully terminates remaining connections
+  5. Exits cleanly with "Graceful shutdown complete" log
+
+#### Non-Root Container (Security)
+- [x] **Multi-stage Dockerfile**: Builder + Production stages
+- [x] **Non-root user**: `appuser` (UID 1000, GID 1000)
+- [x] **Pod Security Context**:
+  ```yaml
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  ```
+- [x] **Container Security Context**:
+  ```yaml
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+  ```
+- [x] **Writable Volumes**: EmptyDir mounts for `/tmp` and `/home/appuser/.cache`
+  - Required because `readOnlyRootFilesystem` prevents temp file creation
+  - gRPC/Riva clients need temp files for streaming operations
+
+#### Secret Management
+- [x] **Secret Template**: `templates/secret.yaml` for sensitive config
+- [x] **Supported Secrets**:
+  - `LLM_API_KEY`: API key for LLM service
+  - `NGC_API_KEY`: NGC API key for NVIDIA services
+  - `extra`: Custom key-value pairs
+- [x] **Usage Options**:
+  1. Create via Helm (`gateway.secrets.create: true`)
+  2. Reference existing secret (`gateway.secrets.existingSecret: "name"`)
+  3. External Secrets Operator (enterprise)
+- [x] **EnvFrom Integration**: Secrets injected as env vars alongside ConfigMap
 
 ---
 
@@ -72,21 +119,121 @@ Implemented Kubernetes best practices for production readiness:
 | Service | `voice-gateway-gateway` | ClusterIP service for gRPC |
 | ConfigMap | `voice-gateway-config` | Runtime configuration |
 | PDB | `voice-gateway-gateway-pdb` | Disruption protection |
+| Secret | `voice-gateway-secrets` | Sensitive credentials (optional) |
 
 ### Configuration Hierarchy
 
 ```
 values.yaml
-├── config.*           → ConfigMap (runtime tunable)
-│   ├── asr.*          → ASR settings
-│   ├── llm.*          → LLM settings (temperature, system prompt)
-│   └── tts.*          → TTS settings
-├── gateway.*          → Deployment settings
-│   ├── resources.*    → CPU/Memory limits
-│   ├── pdb.*          → Pod Disruption Budget
-│   └── env.*          → Service discovery
-└── riva.*/nim.*       → External dependencies (disabled, deployed separately)
+├── config.*                → ConfigMap (runtime tunable)
+│   ├── asr.*               → ASR settings (language, sampleRate)
+│   ├── llm.*               → LLM settings (temperature, systemPrompt)
+│   └── tts.*               → TTS settings (voice, sampleRate)
+├── gateway.*               → Deployment settings
+│   ├── resources.*         → CPU/Memory limits
+│   ├── pdb.*               → Pod Disruption Budget
+│   ├── secrets.*           → Secret management
+│   ├── securityContext.*   → Pod/container security
+│   ├── shutdownGracePeriod → Graceful shutdown config
+│   └── env.*               → Service discovery
+└── riva.*/nim.*            → External dependencies (disabled)
 ```
+
+---
+
+## Security Features
+
+### Container Security Model
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Pod Security Context                         │
+│  runAsNonRoot: true │ runAsUser: 1000 │ fsGroup: 1000           │
+├─────────────────────────────────────────────────────────────────┤
+│                  Container Security Context                      │
+│  readOnlyRootFilesystem: true │ allowPrivilegeEscalation: false │
+│  capabilities: drop ALL                                          │
+├─────────────────────────────────────────────────────────────────┤
+│                      Writable Volumes                            │
+│  /tmp (emptyDir) │ /home/appuser/.cache (emptyDir)              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Why These Settings?
+
+| Setting | Purpose | Impact |
+|---------|---------|--------|
+| `runAsNonRoot: true` | Prevents container from running as root | Blocks privilege escalation attacks |
+| `runAsUser: 1000` | Runs as unprivileged `appuser` | Limits blast radius if compromised |
+| `readOnlyRootFilesystem` | Prevents writes to container filesystem | Blocks malware persistence |
+| `capabilities: drop ALL` | Removes all Linux capabilities | Minimizes kernel attack surface |
+| EmptyDir for `/tmp` | Allows temp files while keeping root read-only | Required for gRPC/Python operations |
+
+### Secret Management Flow
+
+```
+Option 1: Helm-created Secret (Dev/Test)
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────┐
+│   values.yaml   │ ──► │  secret.yaml     │ ──► │ K8s Secret  │
+│ secrets.create  │     │  (template)      │     │             │
+└─────────────────┘     └──────────────────┘     └─────────────┘
+
+Option 2: Existing Secret (Production - Recommended)
+┌─────────────────┐     ┌──────────────────┐
+│ External Tool   │ ──► │ K8s Secret       │ ◄── gateway.secrets.existingSecret
+│ (Vault, kubectl)│     │ "my-secret"      │
+└─────────────────┘     └──────────────────┘
+
+Option 3: External Secrets Operator (Enterprise)
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────┐
+│ Vault/AWS/GCP   │ ──► │ ExternalSecret   │ ──► │ K8s Secret  │
+│                 │     │ CR               │     │             │
+└─────────────────┘     └──────────────────┘     └─────────────┘
+```
+
+---
+
+## Graceful Shutdown Flow
+
+```
+                    SIGTERM received
+                          │
+                          ▼
+        ┌─────────────────────────────────────┐
+        │  "Received SIGTERM, initiating      │
+        │   graceful shutdown..."             │
+        └─────────────────────────────────────┘
+                          │
+                          ▼
+        ┌─────────────────────────────────────┐
+        │  server.stop(grace=10)              │
+        │  • Stop accepting NEW connections   │
+        │  • Wait for active requests         │
+        └─────────────────────────────────────┘
+                          │
+              ┌───────────┴───────────┐
+              │                       │
+              ▼                       ▼
+    Requests complete         Timeout (10s)
+    within grace period       reached
+              │                       │
+              └───────────┬───────────┘
+                          │
+                          ▼
+        ┌─────────────────────────────────────┐
+        │  "Graceful shutdown complete."      │
+        │  Exit(0)                            │
+        └─────────────────────────────────────┘
+```
+
+### Configuration
+
+| Setting | Location | Default | Description |
+|---------|----------|---------|-------------|
+| `SHUTDOWN_GRACE_PERIOD` | Env var / ConfigMap | 10s | Time to wait for active requests |
+| `terminationGracePeriodSeconds` | Deployment spec | 30s | K8s termination timeout |
+
+**Rule**: `terminationGracePeriodSeconds` should be ≥ `SHUTDOWN_GRACE_PERIOD` + buffer
 
 ---
 
@@ -104,6 +251,12 @@ values.yaml
 - **ConfigMap**: LLM temperature and system prompt applied correctly
 - **PDB**: Node drain blocked as expected
 
+### Security & Reliability Test (2025-12-24)
+- **Non-root User**: `uid=1000(appuser)` verified inside container
+- **Graceful Shutdown**: SIGTERM → "Waiting up to 10s..." → "Graceful shutdown complete"
+- **Secret Injection**: `LLM_API_KEY` env var populated from secret
+- **ReadOnly Filesystem**: `/tmp` writable via emptyDir, root filesystem read-only
+
 ---
 
 ## Folder Structure Mapping
@@ -119,9 +272,10 @@ voice-voice-workflow/
 │   │   ├── Chart.yaml          # Chart metadata
 │   │   ├── values.yaml         # Configuration values (WELL DOCUMENTED)
 │   │   └── templates/
-│   │       ├── deployment-gateway.yaml  # Gateway deployment
+│   │       ├── deployment-gateway.yaml  # Gateway deployment (security, volumes)
 │   │       ├── service.yaml             # ClusterIP service
 │   │       ├── configmap.yaml           # Runtime config
+│   │       ├── secret.yaml              # Sensitive credentials
 │   │       └── pdb.yaml                 # Pod Disruption Budget
 │   └── riva-api/               # Local Riva Helm Chart
 ├── k8s/
@@ -138,10 +292,10 @@ voice-voice-workflow/
 │   └── deploy_gateway.sh       # Deploy Gateway using Helm
 └── services/                   # Microservices Source Code
     └── voice-gateway/          # The Orchestrator Service
-        ├── Dockerfile          # Container build definition
+        ├── Dockerfile          # Multi-stage, non-root, security-hardened
         ├── pyproject.toml      # Python dependencies (uv)
         ├── src/
-        │   ├── main.py         # gRPC server entry point
+        │   ├── main.py         # gRPC server with graceful shutdown
         │   └── clients/
         │       ├── asr.py      # Riva ASR client
         │       ├── llm.py      # NIM LLM client (reads ConfigMap env vars)
@@ -192,7 +346,31 @@ Then redeploy:
 ./scripts/deploy_gateway.sh
 ```
 
-### 4. Client Testing (Mac/Local)
+### 4. Using Secrets
+
+**Option A: Reference existing secret**
+```bash
+# Create secret manually
+kubectl create secret generic my-gateway-secrets \
+  --from-literal=LLM_API_KEY=your-api-key \
+  -n voice-workflow
+
+# Deploy with reference
+helm upgrade voice-gateway helm/voice-workflow \
+  --set gateway.secrets.existingSecret=my-gateway-secrets \
+  -n voice-workflow
+```
+
+**Option B: Let Helm create (dev only)**
+```yaml
+# In values.yaml
+gateway:
+  secrets:
+    create: true
+    llmApiKey: "your-api-key"
+```
+
+### 5. Client Testing (Mac/Local)
 
 **On the Server** (headnode):
 ```bash
@@ -242,6 +420,17 @@ uv run test_mic_client.py
 | Liveness | TCP Socket | 50051 | 15s | 30s | 5s | 3 |
 | Readiness | TCP Socket | 50051 | 5s | 10s | 3s | 3 |
 
+### Security Configuration
+
+| Setting | Value | Location |
+|---------|-------|----------|
+| Run as user | `1000 (appuser)` | Pod securityContext |
+| Run as group | `1000 (appgroup)` | Pod securityContext |
+| Read-only root filesystem | `true` | Container securityContext |
+| Allow privilege escalation | `false` | Container securityContext |
+| Dropped capabilities | `ALL` | Container securityContext |
+| Writable volumes | `/tmp`, `/home/appuser/.cache` | EmptyDir mounts |
+
 ### Kubernetes Commands Reference
 
 ```bash
@@ -257,11 +446,21 @@ kubectl get pdb -n voice-workflow
 # View ConfigMap
 kubectl get configmap voice-gateway-config -n voice-workflow -o yaml
 
+# View secrets (names only)
+kubectl get secrets -n voice-workflow
+
 # View gateway logs
 kubectl logs -n voice-workflow -l app=voice-gateway -f
 
 # Describe gateway pod (see resources, probes, events)
 kubectl describe pod -n voice-workflow -l app=voice-gateway
+
+# Check user inside container
+kubectl exec -n voice-workflow -l app=voice-gateway -- id
+
+# Test graceful shutdown
+kubectl delete pod -n voice-workflow -l app=voice-gateway
+# Then check logs for "Graceful shutdown complete"
 ```
 
 ---
@@ -274,12 +473,22 @@ kubectl describe pod -n voice-workflow -l app=voice-gateway
 3. **TTS Voice Name**: Changed from `en-US-Standard-A` to empty string (use default)
 4. **Port Forwarding**: Added `--address 0.0.0.0` for SSH tunnel access
 
-### 2025-12-24
+### 2025-12-24 (Production Hardening)
 1. **Resource Limits**: Added CPU/memory requests and limits to gateway deployment
 2. **Health Probes**: Added liveness and readiness probes (TCP socket)
 3. **ConfigMap**: Created ConfigMap for runtime-tunable LLM parameters
 4. **PDB**: Added Pod Disruption Budget for voluntary disruption protection
 5. **LLM Client**: Updated to read temperature, max_tokens, system_prompt from env vars
+
+### 2025-12-24 (Security & Reliability)
+6. **Graceful Shutdown**: Added SIGTERM handler with configurable grace period
+7. **Non-root User**: Multi-stage Dockerfile with `appuser` (UID 1000)
+8. **Security Context**: Pod and container security hardening
+9. **Secret Management**: Template for sensitive credentials with multiple usage options
+10. **ReadOnly Filesystem Fix**: Added emptyDir volumes for `/tmp` and `.cache`
+    - **Issue**: `readOnlyRootFilesystem: true` prevented Python/gRPC from creating temp files
+    - **Solution**: Mount emptyDir volumes at `/tmp` and `/home/appuser/.cache`
+    - **Result**: Maintains security while allowing necessary temp file operations
 
 ---
 

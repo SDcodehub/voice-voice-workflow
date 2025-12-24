@@ -191,6 +191,14 @@ gateway:
   #   - allowPrivilegeEscalation: false
   #   - capabilities: drop ALL     (removes all Linux capabilities)
   #
+  # Writable Volumes (required for readOnlyRootFilesystem):
+  #   The deployment mounts emptyDir volumes at:
+  #   - /tmp                      (Python/gRPC temp files)
+  #   - /home/appuser/.cache      (Python cache files)
+  #   
+  #   This allows the application to write temp files while keeping
+  #   the root filesystem read-only for security.
+  #
   # If you need to disable (not recommended):
   #   securityContext:
   #     enabled: false
