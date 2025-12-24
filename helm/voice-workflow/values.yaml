@@ -2,6 +2,28 @@
 global:
   ngcSecret: "ngc-secret" # Secret containing NGC API Key
 
+# =============================================================================
+# Runtime Configuration (ConfigMap)
+# Change these values to tune behavior without rebuilding the container
+# =============================================================================
+config:
+  # ASR (Speech-to-Text) Configuration
+  asr:
+    language: "en-US"         # Language code (en-US, hi-IN, etc.)
+    sampleRate: "16000"       # Audio sample rate in Hz
+  
+  # LLM (Language Model) Configuration
+  llm:
+    model: "meta/llama-3.1-8b-instruct"   # Model name for NIM
+    temperature: "0.5"                     # 0.0 = deterministic, 1.0 = creative
+    maxTokens: "1024"                      # Maximum response length
+    systemPrompt: "You are a helpful voice assistant. Keep responses concise and conversational."
+  
+  # TTS (Text-to-Speech) Configuration
+  tts:
+    voice: ""                 # Voice name (empty = default)
+    sampleRate: "16000"       # Output audio sample rate
+
 # Gateway Service (Our Python Code)
 gateway:
   image: docker.io/sagdesai/voice-gateway:latest
@@ -14,6 +36,17 @@ gateway:
     # Direct URLs to existing services
     rivaUri: "riva-api:50051"
     nimUrl: "http://meta-llama3-8b-instruct:8000/v1"
+  # Resource configuration
+  # Based on observed usage: ~1m CPU, ~56Mi memory at idle
+  # Requests: Guaranteed resources for scheduling
+  # Limits: Maximum allowed (prevents runaway processes)
+  resources:
+    requests:
+      memory: "128Mi"   # 2x observed idle usage
+      cpu: "50m"        # 50 millicores (0.05 CPU)
+    limits:
+      memory: "512Mi"   # Headroom for concurrent sessions
+      cpu: "500m"       # 0.5 CPU max
 
 # External Dependency: NVIDIA Riva (ASR/TTS)
 riva:

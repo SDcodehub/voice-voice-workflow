@@ -6,7 +6,7 @@ from openai import AsyncOpenAI
 logger = logging.getLogger(__name__)
 
 class LLMClient:
-    def __init__(self, base_url: str = None, api_key: str = "dummy", model: str = "meta/llama-3.1-8b-instruct"):
+    def __init__(self, base_url: str = None, api_key: str = "dummy", model: str = None):
         """
         Initialize the LLM Client for NVIDIA NIM.
         
@@ -15,12 +15,17 @@ class LLMClient:
             api_key: API Key (usually not needed for self-hosted NIMs inside K8s, but required by SDK)
             model: The specific model name running in the NIM
         """
-        # If no URL is provided, try to find it in env vars, otherwise default to localhost
+        # Configuration from environment variables (set via ConfigMap)
         self.base_url = base_url or os.getenv("LLM_SERVICE_URL", "http://localhost:8000/v1")
         self.api_key = api_key or os.getenv("LLM_API_KEY", "dummy")
         self.model = model or os.getenv("LLM_MODEL", "meta/llama-3.1-8b-instruct")
         
-        logger.info(f"Initializing LLM Client: URL={self.base_url}, Model={self.model}")
+        # Tunable parameters from ConfigMap
+        self.temperature = float(os.getenv("LLM_TEMPERATURE", "0.5"))
+        self.max_tokens = int(os.getenv("LLM_MAX_TOKENS", "1024"))
+        self.default_system_prompt = os.getenv("LLM_SYSTEM_PROMPT", None)
+        
+        logger.info(f"Initializing LLM Client: URL={self.base_url}, Model={self.model}, Temp={self.temperature}")
         
         self.client = AsyncOpenAI(
             base_url=self.base_url,
@@ -33,14 +38,17 @@ class LLMClient:
         
         Args:
             text_input: The user's input text (from ASR)
-            system_prompt: Optional system instruction (e.g., "You are a helpful assistant speaking Hindi")
+            system_prompt: Optional system instruction (overrides default from ConfigMap)
             
         Yields:
             str: Chunks of generated text
         """
         messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
+        
+        # Use provided system_prompt, or fall back to ConfigMap default
+        effective_prompt = system_prompt or self.default_system_prompt
+        if effective_prompt:
+            messages.append({"role": "system", "content": effective_prompt})
         
         messages.append({"role": "user", "content": text_input})
 
@@ -49,8 +57,8 @@ class LLMClient:
                 model=self.model,
                 messages=messages,
                 stream=True,
-                temperature=0.5, # Adjust for creativity vs determinism
-                max_tokens=1024
+                temperature=self.temperature,
+                max_tokens=self.max_tokens
             )
 
             async for chunk in stream:

@@ -2,6 +2,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ .Release.Name }}-gateway
+  labels:
+    app: voice-gateway
+    app.kubernetes.io/name: voice-gateway
+    app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
   replicas: {{ .Values.gateway.replicas }}
   selector:
@@ -11,6 +15,8 @@ spec:
     metadata:
       labels:
         app: voice-gateway
+        app.kubernetes.io/name: voice-gateway
+        app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
       containers:
         - name: gateway
@@ -18,9 +24,40 @@ spec:
           imagePullPolicy: {{ .Values.gateway.imagePullPolicy }}
           ports:
             - containerPort: 50051
+              name: grpc
+              protocol: TCP
           env:
             - name: RIVA_URI
               value: {{ .Values.gateway.env.rivaUri | quote }}
             - name: LLM_SERVICE_URL
               value: {{ .Values.gateway.env.nimUrl | quote }}
-            # Add config for Riva SSL if needed
+          # Load all config from ConfigMap (ASR, LLM, TTS settings)
+          envFrom:
+            - configMapRef:
+                name: {{ .Release.Name }}-config
+          # Resource Management
+          # Based on observed usage: ~1m CPU, ~56Mi memory at idle
+          # Adding headroom for active processing (streaming audio + gRPC)
+          resources:
+            requests:
+              memory: {{ .Values.gateway.resources.requests.memory | default "128Mi" | quote }}
+              cpu: {{ .Values.gateway.resources.requests.cpu | default "50m" | quote }}
+            limits:
+              memory: {{ .Values.gateway.resources.limits.memory | default "512Mi" | quote }}
+              cpu: {{ .Values.gateway.resources.limits.cpu | default "500m" | quote }}
+          # Health Probes - gRPC health checks
+          # Note: Requires grpc health checking protocol or TCP fallback
+          livenessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
