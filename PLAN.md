@@ -1,4 +1,4 @@
-# Voice-to-Voice Hindi Workflow - High Level Plan
+# Voice-to-Voice Workflow - High Level Plan
 
 ## Phase 1: Architecture & Design (✅ Done)
 - [x] Define High-Level Architecture
@@ -11,23 +11,45 @@
 - [x] **TTS Integration**: Riva Client connected.
 - [x] **End-to-End Logic**: Pipeline wired and tested.
 
-## Phase 3: Kubernetes Deployment & Infrastructure (🚀 Current)
+## Phase 3: Kubernetes Deployment & Infrastructure (✅ Done)
+
 ### 3.1: AI Infrastructure (Layer 2)
-- [ ] **NIM Operator Setup**: Ensure Operator is running.
-- [ ] **Deploy LLM NIM**: Apply `k8s/infra/nim-llm.yaml`.
-- [ ] **Deploy Riva**: Install Riva Chart with `k8s/infra/riva-values.yaml`.
+- [x] **NIM Operator Setup**: Operator running.
+- [x] **Deploy LLM NIM**: `meta/llama-3.1-8b-instruct` deployed via `k8s/infra/nim-llm.yaml`.
+- [x] **Deploy Riva**: Helm chart with ASR (Parakeet) + TTS (FastPitch).
 
 ### 3.2: Application Deployment (Layer 3)
-- [ ] **Containerize Gateway**: Build Docker image.
-- [ ] **Gateway Helm Chart**: Complete `helm/voice-workflow`.
-- [ ] **Deploy Gateway**: Install chart connecting to Layer 2 services.
+- [x] **Containerize Gateway**: Image at `docker.io/sagdesai/voice-gateway`.
+- [x] **Gateway Helm Chart**: Complete `helm/voice-workflow`.
+- [x] **Deploy Gateway**: Helm release `voice-gateway` in `voice-workflow` namespace.
+- [x] **E2E Test**: Voice-to-Voice working from Mac client.
 
-## Phase 4: Optimization & Scalability
-- [ ] Implement Low Latency optimizations (streaming improvements).
-- [ ] Horizontal Pod Autoscaling (HPA) configuration.
-- [ ] Load Testing (Locust/K6).
+## Phase 3.5: Production Hardening (✅ Done - 2025-12-24)
 
-## Phase 5: Production Readiness
-- [ ] Logging & Monitoring (Prometheus/Grafana/OTEL).
-- [ ] Security (TLS, Auth).
-- [ ] CI/CD Pipelines.
+### Kubernetes Best Practices
+- [x] **Resource Management**: CPU/Memory requests and limits configured.
+- [x] **Health Probes**: Liveness and readiness probes (TCP socket).
+- [x] **ConfigMap**: Runtime-tunable parameters (LLM temperature, system prompt).
+- [x] **Pod Disruption Budget**: Protection against voluntary disruptions.
+
+### Documentation
+- [x] **values.yaml**: Comprehensive inline documentation.
+- [x] **CURRENT_STATUS.md**: Updated with all improvements and reference tables.
+
+## Phase 4: Optimization & Scalability (🚧 Next)
+- [ ] **Latency Tuning**: Measure E2E latency, optimize buffer sizes.
+- [ ] **Ingress**: Expose gRPC gateway externally (HTTP/2 support).
+- [ ] **Horizontal Pod Autoscaling (HPA)**: Scale gateway based on CPU/requests.
+- [ ] **Load Testing**: Locust/K6 for performance benchmarking.
+
+## Phase 5: Observability (📋 Planned)
+- [ ] **Metrics**: Prometheus metrics (latency histograms, request counts).
+- [ ] **Tracing**: OpenTelemetry spans across ASR→LLM→TTS pipeline.
+- [ ] **Dashboards**: Grafana dashboards for monitoring.
+- [ ] **Alerting**: PagerDuty/Slack alerts for SLA breaches.
+
+## Phase 6: Production Readiness (📋 Planned)
+- [ ] **Security**: TLS for gRPC, API authentication.
+- [ ] **Multi-language**: Hindi ASR/TTS models.
+- [ ] **CI/CD Pipelines**: Automated build, test, deploy.
+- [ ] **Disaster Recovery**: Backup strategies, multi-region.

@@ -1,56 +1,183 @@
-# Global Config
+# =============================================================================
+# Voice Workflow Helm Chart - Configuration Values
+# =============================================================================
+#
+# This file contains all configurable values for the Voice-to-Voice Workflow.
+# Modify these values to customize your deployment without changing templates.
+#
+# Usage:
+#   helm upgrade --install voice-gateway helm/voice-workflow -n voice-workflow
+#
+# Override specific values:
+#   helm upgrade ... --set config.llm.temperature=0.7
+#   helm upgrade ... --set gateway.replicas=3
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Global Configuration
+# -----------------------------------------------------------------------------
 global:
-  ngcSecret: "ngc-secret" # Secret containing NGC API Key
+  ngcSecret: "ngc-secret"   # Kubernetes secret containing NGC_API_KEY
 
 # =============================================================================
-# Runtime Configuration (ConfigMap)
-# Change these values to tune behavior without rebuilding the container
+# RUNTIME CONFIGURATION (ConfigMap)
 # =============================================================================
+# These values are injected as environment variables via ConfigMap.
+# Changes here do NOT require rebuilding the container image.
+# After changing, redeploy with: ./scripts/deploy_gateway.sh
+# -----------------------------------------------------------------------------
 config:
-  # ASR (Speech-to-Text) Configuration
+  # ---------------------------------------------------------------------------
+  # ASR (Automatic Speech Recognition) Configuration
+  # ---------------------------------------------------------------------------
+  # Controls how the Riva ASR service processes incoming audio
   asr:
-    language: "en-US"         # Language code (en-US, hi-IN, etc.)
+    language: "en-US"         # Language code for speech recognition
+                              # Supported: en-US, hi-IN (requires Hindi model)
+                              # Must match the deployed Riva ASR model
     sampleRate: "16000"       # Audio sample rate in Hz
-  
-  # LLM (Language Model) Configuration
-  llm:
-    model: "meta/llama-3.1-8b-instruct"   # Model name for NIM
-    temperature: "0.5"                     # 0.0 = deterministic, 1.0 = creative
-    maxTokens: "1024"                      # Maximum response length
-    systemPrompt: "You are a helpful voice assistant. Keep responses concise and conversational."
-  
-  # TTS (Text-to-Speech) Configuration
-  tts:
-    voice: ""                 # Voice name (empty = default)
-    sampleRate: "16000"       # Output audio sample rate
+                              # Standard: 16000 (telephony/voice), 44100 (music)
+                              # Must match client recording settings
 
-# Gateway Service (Our Python Code)
+  # ---------------------------------------------------------------------------
+  # LLM (Large Language Model) Configuration
+  # ---------------------------------------------------------------------------
+  # Controls the AI response generation behavior
+  llm:
+    model: "meta/llama-3.1-8b-instruct"   # Model identifier for NIM
+                                           # This must match the deployed NIM model
+    
+    temperature: "0.5"        # Controls randomness in responses
+                              # 0.0 = Deterministic (same input → same output)
+                              # 0.5 = Balanced (recommended for voice assistants)
+                              # 1.0 = Creative (more varied, potentially inconsistent)
+    
+    maxTokens: "1024"         # Maximum length of generated response
+                              # Voice responses should be concise: 256-512 typical
+                              # Longer for complex explanations: 1024-2048
+    
+    systemPrompt: "You are a helpful voice assistant. Keep responses concise and conversational."
+                              # Instructions that shape the AI's personality/behavior
+                              # Examples:
+                              # - "You are a Hindi-speaking assistant. Respond in Hindi."
+                              # - "You are a customer service agent for ACME Corp."
+                              # - "Keep responses under 2 sentences."
+
+  # ---------------------------------------------------------------------------
+  # TTS (Text-to-Speech) Configuration
+  # ---------------------------------------------------------------------------
+  # Controls how generated text is converted to audio
+  tts:
+    voice: ""                 # Voice name/ID for synthesis
+                              # Empty string = use default voice for language
+                              # Specific voices depend on deployed TTS model
+    sampleRate: "16000"       # Output audio sample rate in Hz
+                              # Should match client playback capabilities
+
+# =============================================================================
+# GATEWAY SERVICE CONFIGURATION
+# =============================================================================
+# Configuration for the Voice Gateway (our Python gRPC service)
+# -----------------------------------------------------------------------------
 gateway:
+  # ---------------------------------------------------------------------------
+  # Container Image
+  # ---------------------------------------------------------------------------
   image: docker.io/sagdesai/voice-gateway:latest
-  imagePullPolicy: Always
-  replicas: 1
+  imagePullPolicy: Always     # Always = pull latest (dev), IfNotPresent (prod)
+  
+  # ---------------------------------------------------------------------------
+  # Scaling
+  # ---------------------------------------------------------------------------
+  replicas: 1                 # Number of gateway pod replicas
+                              # For HA: set to 2-3 and adjust PDB accordingly
+  
+  # ---------------------------------------------------------------------------
+  # Service Configuration
+  # ---------------------------------------------------------------------------
   service:
-    type: ClusterIP
-    port: 50051
+    type: ClusterIP           # ClusterIP = internal only (use with Ingress)
+                              # LoadBalancer = external IP (cloud providers)
+                              # NodePort = expose on node ports
+    port: 50051               # gRPC service port
+
+  # ---------------------------------------------------------------------------
+  # Environment Variables (Service Discovery)
+  # ---------------------------------------------------------------------------
   env:
-    # Direct URLs to existing services
+    # Riva ASR/TTS service endpoint (Kubernetes service DNS)
     rivaUri: "riva-api:50051"
+    
+    # NIM LLM service endpoint (OpenAI-compatible API)
     nimUrl: "http://meta-llama3-8b-instruct:8000/v1"
-  # Resource configuration
-  # Based on observed usage: ~1m CPU, ~56Mi memory at idle
-  # Requests: Guaranteed resources for scheduling
-  # Limits: Maximum allowed (prevents runaway processes)
+
+  # ---------------------------------------------------------------------------
+  # Resource Management
+  # ---------------------------------------------------------------------------
+  # Kubernetes resource requests and limits for the gateway container.
+  #
+  # How to determine values:
+  #   1. Deploy without limits, run load test
+  #   2. Monitor with: kubectl top pods -n voice-workflow
+  #   3. Set requests = observed usage, limits = 2-4x requests
+  #
+  # Current values based on observed usage (2025-12-24):
+  #   - Idle: ~1m CPU, ~56Mi memory
+  #   - Active (streaming): ~10-50m CPU, ~100-200Mi memory
+  # ---------------------------------------------------------------------------
   resources:
     requests:
-      memory: "128Mi"   # 2x observed idle usage
-      cpu: "50m"        # 50 millicores (0.05 CPU)
+      # Guaranteed resources - used for scheduling decisions
+      memory: "128Mi"         # 2x observed idle usage (safety margin)
+      cpu: "50m"              # 50 millicores = 0.05 CPU cores
     limits:
-      memory: "512Mi"   # Headroom for concurrent sessions
-      cpu: "500m"       # 0.5 CPU max
+      # Maximum allowed - container killed if exceeded (OOMKilled)
+      memory: "512Mi"         # Headroom for concurrent sessions + spikes
+      cpu: "500m"             # 0.5 CPU cores max
 
-# External Dependency: NVIDIA Riva (ASR/TTS)
+  # ---------------------------------------------------------------------------
+  # Pod Disruption Budget (PDB)
+  # ---------------------------------------------------------------------------
+  # Protects pods from VOLUNTARY disruptions:
+  #   ✓ Node drains (kubectl drain)
+  #   ✓ Cluster upgrades
+  #   ✓ Voluntary scaling down
+  #   ✗ Does NOT protect from: Node crashes, OOM kills, hardware failures
+  #
+  # Configuration options:
+  #   minAvailable: N     - At least N pods must always be running
+  #   maxUnavailable: N   - At most N pods can be down simultaneously
+  #
+  # Recommendations by replica count:
+  #   replicas: 1 → minAvailable: 0 (allow disruption, or don't enable PDB)
+  #   replicas: 2 → minAvailable: 1 (always keep 1 running)
+  #   replicas: 3 → minAvailable: 2 OR maxUnavailable: 1
+  #
+  # Testing PDB:
+  #   kubectl drain <node> --ignore-daemonsets --pod-selector=app=voice-gateway
+  #   Expected: "Cannot evict pod as it would violate the pod's disruption budget"
+  # ---------------------------------------------------------------------------
+  pdb:
+    enabled: true
+    minAvailable: 1           # With 1 replica, this blocks all voluntary evictions
+                              # Set to 0 if you want to allow node drains
+    # maxUnavailable: 1       # Alternative: use this for HA setups
+
+# =============================================================================
+# EXTERNAL DEPENDENCIES
+# =============================================================================
+# These services are deployed separately (via k8s/infra/ manifests)
+# The flags below control whether this Helm chart should deploy them
+# -----------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+# NVIDIA Riva (ASR/TTS)
+# -----------------------------------------------------------------------------
+# Deployed manually via: ./scripts/deploy_riva.sh
+# Using chart: helm/riva-api with k8s/infra/riva-values.yaml
 riva:
-  enabled: false  # We deployed this manually
+  enabled: false              # false = already deployed separately
   ngcSecret: "ngc-secret"
   service:
     type: ClusterIP
@@ -58,11 +185,15 @@ riva:
     modelDeployKey: "tlt_encode"
     ngcSecret: "ngc-secret"
 
-# External Dependency: NVIDIA NIM (LLM)
+# -----------------------------------------------------------------------------
+# NVIDIA NIM (LLM)
+# -----------------------------------------------------------------------------
+# Deployed manually via: ./scripts/deploy_infra.sh
+# Using manifest: k8s/infra/nim-llm.yaml
 nim:
-  enabled: false # We deployed this manually
+  enabled: false              # false = already deployed separately
   image: nvcr.io/nim/meta/llama3-8b-instruct:latest
   replicas: 1
   resources:
     limits:
-      nvidia.com/gpu: 1
+      nvidia.com/gpu: 1       # GPU allocation for LLM inference

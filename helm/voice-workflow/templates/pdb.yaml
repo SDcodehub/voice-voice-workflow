@@ -1,0 +1,29 @@
+{{- if .Values.gateway.pdb.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Release.Name }}-gateway-pdb
+  labels:
+    app: voice-gateway
+    app.kubernetes.io/name: voice-gateway
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  # Minimum number of pods that must remain available during voluntary disruptions
+  # Options:
+  #   minAvailable: 1      - At least 1 pod must always be running
+  #   maxUnavailable: 1    - At most 1 pod can be down at a time
+  #
+  # For single-replica deployments, use minAvailable: 0 or don't enable PDB
+  # For multi-replica (HA), use minAvailable: 1 or maxUnavailable: 50%
+  {{- if .Values.gateway.pdb.minAvailable }}
+  minAvailable: {{ .Values.gateway.pdb.minAvailable }}
+  {{- else if .Values.gateway.pdb.maxUnavailable }}
+  maxUnavailable: {{ .Values.gateway.pdb.maxUnavailable }}
+  {{- else }}
+  minAvailable: 1
+  {{- end }}
+  selector:
+    matchLabels:
+      app: voice-gateway
+{{- end }}
+
