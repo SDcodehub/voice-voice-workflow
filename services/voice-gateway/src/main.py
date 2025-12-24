@@ -2,6 +2,7 @@ import asyncio
 import logging
 import grpc
 import os
+import signal
 import riva.client
 from concurrent import futures
 from typing import AsyncGenerator
@@ -14,8 +15,16 @@ from clients.asr import ASRClient
 from clients.llm import LLMClient
 from clients.tts import TTSClient
 
-logging.basicConfig(level=logging.DEBUG) # Enable DEBUG logs
+# Configure logging
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
+
+# Graceful shutdown configuration
+SHUTDOWN_GRACE_PERIOD = int(os.getenv("SHUTDOWN_GRACE_PERIOD", "10"))  # seconds
 
 class VoiceGatewayServicer(voice_workflow_pb2_grpc.VoiceGatewayServicer):
     """Implementation of the Voice Gateway Service."""
@@ -170,17 +179,72 @@ class VoiceGatewayServicer(voice_workflow_pb2_grpc.VoiceGatewayServicer):
             )
 
 async def serve():
-    port = '50051'
-    server = grpc.aio.server(futures.ThreadPoolExecutor(max_workers=10))
+    """
+    Start the gRPC server with graceful shutdown support.
+    
+    Graceful shutdown flow:
+    1. SIGTERM/SIGINT received (from Kubernetes or Ctrl+C)
+    2. Server stops accepting NEW connections
+    3. Waits up to SHUTDOWN_GRACE_PERIOD seconds for existing requests to complete
+    4. Forcefully terminates remaining connections
+    5. Exit cleanly
+    """
+    port = os.getenv("GRPC_PORT", "50051")
+    max_workers = int(os.getenv("GRPC_MAX_WORKERS", "10"))
+    
+    server = grpc.aio.server(
+        futures.ThreadPoolExecutor(max_workers=max_workers),
+        options=[
+            # Maximum time to wait for in-flight RPCs to complete during shutdown
+            ('grpc.max_connection_idle_ms', 60000),
+        ]
+    )
     voice_workflow_pb2_grpc.add_VoiceGatewayServicer_to_server(VoiceGatewayServicer(), server)
     
     server.add_insecure_port('[::]:' + port)
+    
+    # Graceful shutdown handler
+    shutdown_event = asyncio.Event()
+    
+    async def graceful_shutdown(sig_name: str):
+        """Handle shutdown signal gracefully."""
+        logger.info(f"Received {sig_name}, initiating graceful shutdown...")
+        logger.info(f"Waiting up to {SHUTDOWN_GRACE_PERIOD}s for active requests to complete...")
+        
+        # Stop accepting new requests, wait for existing ones
+        # grace parameter: time to wait for RPCs to complete
+        await server.stop(grace=SHUTDOWN_GRACE_PERIOD)
+        
+        logger.info("Graceful shutdown complete.")
+        shutdown_event.set()
+    
+    # Register signal handlers
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(
+            sig,
+            lambda s=sig: asyncio.create_task(graceful_shutdown(s.name))
+        )
+    
     logger.info(f"Starting Voice Gateway on port {port}")
+    logger.info(f"Max workers: {max_workers}, Shutdown grace period: {SHUTDOWN_GRACE_PERIOD}s")
+    
     await server.start()
-    await server.wait_for_termination()
+    
+    # Wait for shutdown signal or server termination
+    await shutdown_event.wait()
 
-if __name__ == '__main__':
+
+def main():
+    """Entry point with proper signal handling."""
     try:
         asyncio.run(serve())
     except KeyboardInterrupt:
-        pass
+        logger.info("Keyboard interrupt received, exiting...")
+    except Exception as e:
+        logger.error(f"Server crashed: {e}", exc_info=True)
+        raise
+
+
+if __name__ == '__main__':
+    main()

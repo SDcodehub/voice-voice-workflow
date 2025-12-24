@@ -164,6 +164,73 @@ gateway:
                               # Set to 0 if you want to allow node drains
     # maxUnavailable: 1       # Alternative: use this for HA setups
 
+  # ---------------------------------------------------------------------------
+  # Graceful Shutdown
+  # ---------------------------------------------------------------------------
+  # When Kubernetes sends SIGTERM (pod termination), the gateway:
+  #   1. Stops accepting NEW connections
+  #   2. Waits for EXISTING requests to complete (up to shutdownGracePeriod)
+  #   3. Forcefully terminates remaining connections
+  #   4. Exits cleanly
+  #
+  # terminationGracePeriodSeconds should be >= shutdownGracePeriod + buffer
+  # ---------------------------------------------------------------------------
+  shutdownGracePeriod: "10"           # Seconds to wait for active requests
+  terminationGracePeriodSeconds: 30   # K8s termination grace period
+  logLevel: "INFO"                    # Logging level: DEBUG, INFO, WARNING, ERROR
+
+  # ---------------------------------------------------------------------------
+  # Security Context
+  # ---------------------------------------------------------------------------
+  # The gateway runs as a non-root user (UID 1000) for security.
+  # This is enforced at both pod and container level.
+  #
+  # Security features enabled:
+  #   - runAsNonRoot: true         (prevents running as root)
+  #   - readOnlyRootFilesystem     (prevents writing to container filesystem)
+  #   - allowPrivilegeEscalation: false
+  #   - capabilities: drop ALL     (removes all Linux capabilities)
+  #
+  # If you need to disable (not recommended):
+  #   securityContext:
+  #     enabled: false
+  # ---------------------------------------------------------------------------
+  securityContext:
+    enabled: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+
+  # ---------------------------------------------------------------------------
+  # Secret Management
+  # ---------------------------------------------------------------------------
+  # Sensitive configuration (API keys, credentials) should be stored in Secrets,
+  # NOT in ConfigMaps (which are visible to anyone with namespace access).
+  #
+  # Options:
+  #   1. Let Helm create secrets (set create: true, provide values)
+  #      ⚠️  Not recommended for production - values visible in values.yaml
+  #
+  #   2. Use existing secret (set create: false, existingSecret: "name")
+  #      ✓  Recommended - create secret manually or via external tool
+  #
+  #   3. External Secrets Operator (enterprise)
+  #      Create ExternalSecret CR that syncs from Vault/AWS/GCP
+  #
+  # Creating secrets manually:
+  #   kubectl create secret generic gateway-secrets \
+  #     --from-literal=LLM_API_KEY=your-key \
+  #     -n voice-workflow
+  # ---------------------------------------------------------------------------
+  secrets:
+    create: false                     # Set to true to create secret from values below
+    existingSecret: ""                # Name of existing secret to use
+    # Values below only used if create: true
+    # llmApiKey: ""                   # API key for LLM (if required)
+    # ngcApiKey: ""                   # NGC API key
+    # extra:                          # Additional key-value pairs
+    #   CUSTOM_KEY: "value"
+
 # =============================================================================
 # EXTERNAL DEPENDENCIES
 # =============================================================================
