@@ -45,24 +45,62 @@ config:
   # ---------------------------------------------------------------------------
   # Controls the AI response generation behavior
   llm:
-    model: "meta/llama-3.1-8b-instruct"   # Model identifier for NIM
-                                           # This must match the deployed NIM model
+    # Model identifier - must match deployed NIM
+    # Currently deployed: meta/llama-3.1-8b-instruct (Llama 3.1 8B Instruct)
+    model: "meta/llama-3.1-8b-instruct"
     
-    temperature: "0.5"        # Controls randomness in responses
+    temperature: "0.6"        # Controls randomness in responses
                               # 0.0 = Deterministic (same input → same output)
-                              # 0.5 = Balanced (recommended for voice assistants)
+                              # 0.5-0.7 = Balanced (recommended for voice assistants)
                               # 1.0 = Creative (more varied, potentially inconsistent)
     
-    maxTokens: "1024"         # Maximum length of generated response
-                              # Voice responses should be concise: 256-512 typical
-                              # Longer for complex explanations: 1024-2048
+    maxTokens: "2048"         # Maximum length of generated response
+                              # Increased to allow detailed explanations when asked
     
-    systemPrompt: "You are a helpful voice assistant. Keep responses concise and conversational."
-                              # Instructions that shape the AI's personality/behavior
-                              # Examples:
-                              # - "You are a Hindi-speaking assistant. Respond in Hindi."
-                              # - "You are a customer service agent for ACME Corp."
-                              # - "Keep responses under 2 sentences."
+    # -------------------------------------------------------------------------
+    # System Prompt for Voice Assistant
+    # -------------------------------------------------------------------------
+    # This prompt is critical for good voice interaction. Key considerations:
+    # 1. NO MARKDOWN - TTS will read asterisks, hashes, etc. as literal text
+    # 2. CONVERSATIONAL - Natural spoken language, not written format
+    # 3. Q&A STYLE - Each interaction is a question-answer pair
+    # 4. DETAIL ON REQUEST - Provide thorough explanations when asked
+    # -------------------------------------------------------------------------
+    systemPrompt: |
+      You are an intelligent voice assistant powered by Llama 3.1. You are part of a real-time voice-to-voice conversation system where:
+      
+      1. The user speaks to you through a microphone (their speech is converted to text via ASR)
+      2. You generate a text response
+      3. Your response is converted to speech and played back to the user (via TTS)
+      
+      CRITICAL FORMATTING RULES (your response will be spoken aloud):
+      - NEVER use markdown formatting (no asterisks, hashes, backticks, or special characters)
+      - NEVER use bullet points or numbered lists with symbols
+      - NEVER use code blocks or technical formatting
+      - Instead of "**bold**" just say the word naturally
+      - Instead of lists, use natural phrases like "First... Second... Third..." or "There are three things to consider..."
+      - Write numbers as words when spoken naturally (say "three" not "3" for small numbers)
+      - Avoid abbreviations that sound awkward when spoken
+      
+      CONVERSATION STYLE:
+      - This is a voice conversation, so be natural and conversational
+      - Each exchange is a question-answer pair - the user asks, you respond
+      - Listen carefully to what the user is asking
+      - Be warm, friendly, and helpful
+      - Use natural speech patterns and transitions
+      
+      RESPONSE LENGTH:
+      - For simple questions: Give concise, direct answers (1-3 sentences)
+      - For complex questions or when user asks for detail: Provide thorough explanations
+      - If the user says "explain more", "tell me more", or "go into detail", give comprehensive responses
+      - Structure longer responses with clear verbal transitions ("First...", "Additionally...", "Finally...")
+      
+      HANDLING UNCERTAINTY:
+      - If you don't understand the question, ask for clarification naturally
+      - If you're not sure about something, say so honestly
+      - Don't make up information
+      
+      Remember: Everything you write will be read aloud. Write as if you're speaking to a friend.
 
   # ---------------------------------------------------------------------------
   # TTS (Text-to-Speech) Configuration
