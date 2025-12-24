@@ -61,20 +61,45 @@
 - [x] **Flexible Options**: Helm-created or existing secret reference.
 - [x] **Tested**: `LLM_API_KEY` env var populated from secret.
 
-## Phase 4: Optimization & Scalability (🚧 Next)
-- [ ] **Latency Tuning**: Measure E2E latency, optimize buffer sizes.
-- [ ] **Ingress**: Expose gRPC gateway externally (HTTP/2 support).
-- [ ] **Horizontal Pod Autoscaling (HPA)**: Scale gateway based on CPU/requests.
-- [ ] **Load Testing**: Locust/K6 for performance benchmarking.
+## Phase 4: Voice Interaction Improvements (🚧 Next)
+
+### Echo Cancellation (AEC)
+- [ ] **Problem**: Mic picks up speaker output → feedback loop
+- [ ] **Mobile Solution**: Native audio APIs with voice mode (OS handles AEC)
+- [ ] **Desktop Solution**: WebRTC AEC integration in client
+
+### Barge-in/Interruption Support
+- [ ] **Problem**: Can't interrupt during TTS playback (half-duplex)
+- [ ] **Proto Change**: Add `CANCEL_TTS` message type
+- [ ] **Gateway**: State machine with interrupt handling
+- [ ] **Client**: VAD to detect speech during TTS
 
 ## Phase 5: Observability (📋 Planned)
-- [ ] **Metrics**: Prometheus metrics (latency histograms, request counts).
-- [ ] **Tracing**: OpenTelemetry spans across ASR→LLM→TTS pipeline.
-- [ ] **Dashboards**: Grafana dashboards for monitoring.
-- [ ] **Alerting**: PagerDuty/Slack alerts for SLA breaches.
 
-## Phase 6: Production Readiness (📋 Planned)
-- [ ] **Security**: TLS for gRPC, API authentication.
-- [ ] **Multi-language**: Hindi ASR/TTS models.
-- [ ] **CI/CD Pipelines**: Automated build, test, deploy.
-- [ ] **Disaster Recovery**: Backup strategies, multi-region.
+### Metrics (Prometheus)
+- [ ] `voice_asr_latency_seconds` - ASR processing time
+- [ ] `voice_llm_latency_seconds` - LLM generation time
+- [ ] `voice_tts_latency_seconds` - TTS synthesis time
+- [ ] `voice_e2e_latency_seconds` - Total round-trip
+- [ ] `voice_sessions_active` - Active sessions gauge
+
+### Tracing (OpenTelemetry)
+- [ ] Span hierarchy: session → asr → llm → tts
+- [ ] Attributes: language, model, tokens, duration
+
+### Dashboards (Grafana)
+- [ ] Latency percentiles (p50, p95, p99)
+- [ ] Request/error rates
+- [ ] Component breakdown
+
+## Phase 6: Performance & Scale (📋 Planned)
+- [ ] **Load Testing**: Locust/K6 with gRPC support
+- [ ] **Latency Optimization**: Buffer tuning, streaming optimization
+- [ ] **HPA**: Horizontal Pod Autoscaler on custom metrics
+- [ ] **Ingress**: HTTP/2 support (Traefik/Nginx)
+
+## Phase 7: Production Readiness (📋 Planned)
+- [ ] **Security**: TLS/mTLS, API authentication, rate limiting
+- [ ] **Multi-language**: Hindi ASR/TTS models
+- [ ] **CI/CD Pipelines**: Automated build, test, deploy
+- [ ] **Multi-region**: Disaster recovery, low-latency deployment

@@ -492,20 +492,102 @@ kubectl delete pod -n voice-workflow -l app=voice-gateway
 
 ---
 
-## Next Steps (Phase 4: Optimization & Observability)
+## Future Directions
 
-### Immediate
-1. **Latency Tuning**: Measure E2E latency and optimize buffer sizes
-2. **Ingress**: Expose gRPC gateway externally (Traefik/Nginx with HTTP/2)
+### Phase 4: Voice Interaction Improvements
 
-### Future (Planned)
-1. **Load Testing**: Locust/K6 for performance benchmarking
-2. **Observability**: 
-   - Prometheus metrics (latency histograms, request counts)
-   - OpenTelemetry tracing (span tracking across ASR→LLM→TTS)
-   - Grafana dashboards
-3. **Multi-language**: Add Hindi ASR/TTS models
-4. **Security**: TLS for gRPC, authentication
+#### Problem 1: Echo/Feedback Loop
+**Issue**: When using speakers (not headphones), microphone picks up TTS output → ASR processes it → creates infinite conversation loop.
+
+**Core Solution**: Acoustic Echo Cancellation (AEC)
+- **Mobile**: Use native audio APIs with voice mode (`AVAudioSession.voiceChat` on iOS, `MODE_IN_COMMUNICATION` on Android) - OS handles AEC automatically
+- **Desktop**: Integrate WebRTC AEC library in client, or use platform-specific audio APIs with AEC enabled
+- **Fallback**: Mute microphone during TTS playback (simple but prevents interruption)
+
+#### Problem 2: No Barge-in/Interruption Support
+**Issue**: Current half-duplex architecture completes full turn (ASR→LLM→TTS) before listening again. User cannot interrupt long responses.
+
+**Core Solution**: Full-duplex streaming with interrupt handling
+- Add `CANCEL_TTS` message type to proto for client-initiated interrupts
+- Gateway state machine: IDLE → LISTENING → PROCESSING → SPEAKING (can transition back to LISTENING on interrupt)
+- Client-side VAD (Voice Activity Detection) to detect user speech during TTS playback
+- Requires AEC to work properly (otherwise detecting speech during TTS is unreliable)
+
+#### Problem 3: Platform-Specific Audio Handling
+**Issue**: Different platforms have different echo/noise characteristics.
+
+**Solution by Platform**:
+| Platform | Echo Severity | Solution |
+|----------|---------------|----------|
+| Mac (speakers) | Severe | WebRTC AEC or headphones |
+| Mac (headphones) | None | Physical isolation |
+| Mobile (earpiece) | Minimal | OS AEC (automatic) |
+| Mobile (speakerphone) | Moderate | OS AEC handles it |
+| Smart Speaker | Severe | Hardware AEC + beamforming |
+
+### Phase 5: Observability
+
+#### Metrics (Prometheus)
+| Metric | Type | Description |
+|--------|------|-------------|
+| `voice_asr_latency_seconds` | Histogram | Time from audio received to transcript |
+| `voice_llm_latency_seconds` | Histogram | Time to first LLM token |
+| `voice_tts_latency_seconds` | Histogram | Time to first TTS audio chunk |
+| `voice_e2e_latency_seconds` | Histogram | Total round-trip time |
+| `voice_sessions_active` | Gauge | Current active sessions |
+| `voice_requests_total` | Counter | Total requests by status |
+
+#### Tracing (OpenTelemetry)
+```
+Span: voice_session
+├── Span: asr_transcribe
+│   └── Attributes: language, duration_ms, transcript_length
+├── Span: llm_generate
+│   └── Attributes: model, tokens_generated, temperature
+└── Span: tts_synthesize
+    └── Attributes: voice, audio_duration_ms
+```
+
+#### Dashboards (Grafana)
+- Real-time latency percentiles (p50, p95, p99)
+- Request rate and error rate
+- Active sessions over time
+- Component breakdown (ASR vs LLM vs TTS)
+
+### Phase 6: Performance & Scale
+
+#### Load Testing
+- **Tool**: Locust or K6 with gRPC support
+- **Scenarios**: Concurrent sessions, sustained load, burst traffic
+- **Metrics**: Throughput, latency under load, error rates
+
+#### Latency Optimization
+- Buffer size tuning for ASR streaming
+- LLM token streaming optimization
+- TTS chunk size optimization
+- Network latency measurement
+
+#### Horizontal Scaling
+- HPA (Horizontal Pod Autoscaler) based on CPU/memory
+- Custom metrics scaling (active sessions)
+- Connection draining for graceful scale-down
+
+### Phase 7: Production Readiness
+
+#### Security
+- TLS for gRPC (mTLS for service-to-service)
+- API authentication (JWT/API keys)
+- Rate limiting per client
+
+#### Multi-language
+- Hindi ASR model (`conformer_hindi`)
+- Hindi TTS model (`fastpitch_hifigan_hindi`)
+- Language detection or client-specified language
+
+#### Infrastructure
+- Ingress with HTTP/2 support (Traefik/Nginx)
+- CI/CD pipelines (build, test, deploy)
+- Multi-region deployment for latency
 
 ---
 
