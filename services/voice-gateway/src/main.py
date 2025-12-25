@@ -14,6 +14,7 @@ import voice_workflow_pb2_grpc
 from clients.asr import ASRClient
 from clients.llm import LLMClient
 from clients.tts import TTSClient
+from metrics import METRICS, metrics_server, Timer
 
 # Configure logging
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -25,6 +26,9 @@ logger = logging.getLogger(__name__)
 
 # Graceful shutdown configuration
 SHUTDOWN_GRACE_PERIOD = int(os.getenv("SHUTDOWN_GRACE_PERIOD", "10"))  # seconds
+
+# Metrics configuration
+METRICS_PORT = int(os.getenv("METRICS_PORT", "8080"))
 
 class VoiceGatewayServicer(voice_workflow_pb2_grpc.VoiceGatewayServicer):
     """Implementation of the Voice Gateway Service."""
@@ -45,11 +49,27 @@ class VoiceGatewayServicer(voice_workflow_pb2_grpc.VoiceGatewayServicer):
         self.llm_client = LLMClient(base_url=self.nim_url)
         # TTSClient might need lang config too, checking later. 
         # For now, we move ASRClient creation to per-session.
+        
+        # Set service info for metrics
+        METRICS.set_info(
+            version="0.2.0",
+            model=self.llm_client.model,
+            asr_lang=os.getenv("ASR_LANGUAGE", "en-US")
+        )
 
     async def StreamAudio(self, request_iterator, context):
         """
         Bidirectional streaming RPC.
+        
+        Metrics collected:
+        - active_streams: Number of concurrent streams (gauge)
+        - e2e_latency: Time from final ASR transcript to first TTS audio
+        - requests_total: Total request count with status label
         """
+        # Track active streams
+        METRICS.active_streams.inc()
+        request_status = "success"
+        
         # Queue to decouple input request stream from processing logic
         # We can also just use an async generator adapter.
         
@@ -127,6 +147,11 @@ class VoiceGatewayServicer(voice_workflow_pb2_grpc.VoiceGatewayServicer):
                     yield voice_workflow_pb2.ServerMessage(
                         event=voice_workflow_pb2.ServerEvent(type=voice_workflow_pb2.PROCESSING)
                     )
+                    
+                    # Start E2E timer (ASR final -> first TTS audio)
+                    e2e_timer = Timer()
+                    e2e_timer.start()
+                    e2e_recorded = False
 
                     # Send to LLM
                     llm_stream = self.llm_client.generate_response(transcript)
@@ -149,6 +174,12 @@ class VoiceGatewayServicer(voice_workflow_pb2_grpc.VoiceGatewayServicer):
                                 logger.info(f"Speaking: {to_speak}")
                                 tts_stream = tts_client.synthesize_stream(to_speak)
                                 async for audio_chunk in tts_stream:
+                                    # Record E2E latency on first audio chunk
+                                    if not e2e_recorded:
+                                        e2e_timer.stop()
+                                        METRICS.e2e_latency.observe(e2e_timer.duration)
+                                        logger.info(f"E2E latency: {e2e_timer.duration:.3f}s")
+                                        e2e_recorded = True
                                     yield voice_workflow_pb2.ServerMessage(audio_chunk=audio_chunk)
                             sentence_buffer = ""
                     
@@ -158,6 +189,12 @@ class VoiceGatewayServicer(voice_workflow_pb2_grpc.VoiceGatewayServicer):
                         logger.info(f"Speaking (Final): {to_speak}")
                         tts_stream = tts_client.synthesize_stream(to_speak)
                         async for audio_chunk in tts_stream:
+                            # Record E2E latency on first audio chunk (if not already recorded)
+                            if not e2e_recorded:
+                                e2e_timer.stop()
+                                METRICS.e2e_latency.observe(e2e_timer.duration)
+                                logger.info(f"E2E latency: {e2e_timer.duration:.3f}s")
+                                e2e_recorded = True
                             yield voice_workflow_pb2.ServerMessage(audio_chunk=audio_chunk)
 
                     yield voice_workflow_pb2.ServerMessage(
@@ -166,6 +203,7 @@ class VoiceGatewayServicer(voice_workflow_pb2_grpc.VoiceGatewayServicer):
 
         except Exception as e:
             logger.error(f"Error in StreamAudio: {e}", exc_info=True)
+            request_status = "error"
             yield voice_workflow_pb2.ServerMessage(
                 event=voice_workflow_pb2.ServerEvent(
                     type=voice_workflow_pb2.ERROR,
@@ -173,6 +211,10 @@ class VoiceGatewayServicer(voice_workflow_pb2_grpc.VoiceGatewayServicer):
                 )
             )
         finally:
+            # Decrement active streams and record request status
+            METRICS.active_streams.dec()
+            METRICS.requests_total.labels(status=request_status).inc()
+            
             input_task.cancel()
             yield voice_workflow_pb2.ServerMessage(
                 event=voice_workflow_pb2.ServerEvent(type=voice_workflow_pb2.END_OF_TURN)
@@ -188,9 +230,22 @@ async def serve():
     3. Waits up to SHUTDOWN_GRACE_PERIOD seconds for existing requests to complete
     4. Forcefully terminates remaining connections
     5. Exit cleanly
+    
+    Metrics:
+    - Prometheus metrics exposed on port 8080 (configurable via METRICS_PORT)
+    - Separate from gRPC to ensure zero impact on main flow
     """
     port = os.getenv("GRPC_PORT", "50051")
     max_workers = int(os.getenv("GRPC_MAX_WORKERS", "10"))
+    
+    # Start Prometheus metrics server (runs in background thread, non-blocking)
+    # This is on a SEPARATE port from gRPC to ensure zero latency impact
+    try:
+        metrics_server.port = METRICS_PORT
+        metrics_server.start()
+        logger.info(f"Prometheus metrics available at http://localhost:{METRICS_PORT}/metrics")
+    except Exception as e:
+        logger.warning(f"Failed to start metrics server: {e} - continuing without metrics")
     
     server = grpc.aio.server(
         futures.ThreadPoolExecutor(max_workers=max_workers),

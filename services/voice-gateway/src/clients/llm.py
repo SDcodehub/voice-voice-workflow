@@ -3,6 +3,8 @@ import os
 from typing import AsyncGenerator
 from openai import AsyncOpenAI
 
+from metrics import METRICS, Timer
+
 logger = logging.getLogger(__name__)
 
 class LLMClient:
@@ -42,6 +44,11 @@ class LLMClient:
             
         Yields:
             str: Chunks of generated text
+            
+        Metrics collected:
+        - llm_ttft: Time to first token
+        - llm_total: Total generation time
+        - llm_tokens: Number of tokens generated
         """
         messages = []
         
@@ -51,8 +58,17 @@ class LLMClient:
             messages.append({"role": "system", "content": effective_prompt})
         
         messages.append({"role": "user", "content": text_input})
+        
+        # Timers for latency metrics
+        total_timer = Timer()
+        ttft_timer = Timer()
+        first_token_received = False
+        token_count = 0
 
         try:
+            total_timer.start()
+            ttft_timer.start()
+            
             stream = await self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
@@ -64,10 +80,25 @@ class LLMClient:
             async for chunk in stream:
                 content = chunk.choices[0].delta.content
                 if content:
+                    # Record time to first token
+                    if not first_token_received:
+                        ttft_timer.stop()
+                        METRICS.llm_ttft.labels(model=self.model).observe(ttft_timer.duration)
+                        logger.debug(f"LLM TTFT: {ttft_timer.duration:.3f}s")
+                        first_token_received = True
+                    
+                    token_count += 1
                     yield content
+            
+            # Record total generation metrics
+            total_timer.stop()
+            METRICS.llm_total.labels(model=self.model).observe(total_timer.duration)
+            METRICS.llm_tokens.labels(model=self.model).observe(token_count)
+            logger.debug(f"LLM total: {total_timer.duration:.3f}s, tokens: {token_count}")
 
         except Exception as e:
             logger.error(f"Error generating LLM response: {e}")
+            METRICS.llm_errors.labels(error_type=type(e).__name__).inc()
             # In a production system, we might yield a fallback error message or re-raise
             raise e
 

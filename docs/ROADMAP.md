@@ -54,19 +54,24 @@
 
 ## Planned Phases
 
-### Phase 5: Observability 📋
+### Phase 5: Observability 🚧 (2025-12-25)
 
-- [ ] Prometheus Metrics
-  - ASR latency histogram
-  - LLM time-to-first-token
-  - TTS synthesis time
+- [x] Prometheus Metrics
+  - ASR latency histogram (`voice_gateway_asr_latency_seconds`)
+  - LLM time-to-first-token (`voice_gateway_llm_ttft_seconds`)
+  - LLM total generation time (`voice_gateway_llm_total_seconds`)
+  - TTS synthesis time (`voice_gateway_tts_latency_seconds`)
+  - E2E latency (`voice_gateway_e2e_latency_seconds`)
   - Request counts, error rates
+- [x] DCGM GPU Metrics Integration
+  - GPU utilization, memory, temperature, power
+  - Pre-built dashboard (ID: 12239)
+- [x] Grafana Dashboards
+  - Custom Voice Gateway dashboard
+  - Latency breakdown panels (ASR/LLM/TTS)
 - [ ] OpenTelemetry Tracing
   - Span tracking across ASR→LLM→TTS
   - Distributed trace context
-- [ ] Grafana Dashboards
-  - Real-time latency monitoring
-  - Error rate alerts
 - [ ] Alerting (PagerDuty/Slack)
 
 ### Phase 6: Production Readiness 📋

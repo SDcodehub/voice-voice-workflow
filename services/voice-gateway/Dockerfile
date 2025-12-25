@@ -50,14 +50,15 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     # Application defaults (can be overridden)
     GRPC_PORT=50051 \
+    METRICS_PORT=8080 \
     LOG_LEVEL=INFO \
     SHUTDOWN_GRACE_PERIOD=10
 
 # Switch to non-root user
 USER appuser
 
-# Expose gRPC port
-EXPOSE 50051
+# Expose gRPC port and metrics port
+EXPOSE 50051 8080
 
 # Health check (optional, K8s probes are preferred)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

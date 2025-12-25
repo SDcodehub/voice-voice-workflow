@@ -139,6 +139,37 @@ gateway:
                               # LoadBalancer = external IP (cloud providers)
                               # NodePort = expose on node ports
     port: 50051               # gRPC service port
+  
+  # ---------------------------------------------------------------------------
+  # Metrics Configuration (Prometheus)
+  # ---------------------------------------------------------------------------
+  # Prometheus metrics are exposed on a SEPARATE port from gRPC.
+  # This ensures ZERO latency impact on the main voice flow.
+  #
+  # Available metrics:
+  #   - voice_gateway_asr_latency_seconds (histogram)
+  #   - voice_gateway_llm_ttft_seconds (histogram) - Time to First Token
+  #   - voice_gateway_llm_total_seconds (histogram)
+  #   - voice_gateway_tts_latency_seconds (histogram)
+  #   - voice_gateway_e2e_latency_seconds (histogram) - End-to-End
+  #   - voice_gateway_requests_total (counter)
+  #   - voice_gateway_active_streams (gauge)
+  #   - voice_gateway_*_errors_total (counters)
+  #
+  # Prometheus will auto-discover via pod/service annotations.
+  # ---------------------------------------------------------------------------
+  metrics:
+    port: 8080                # Metrics HTTP server port (separate from gRPC)
+    
+    # ServiceMonitor for Prometheus Operator (kube-prometheus-stack)
+    # Enable this if using Prometheus Operator for auto-discovery
+    serviceMonitor:
+      enabled: true           # Enable for Prometheus Operator discovery
+      namespace: "prometheus" # Namespace where ServiceMonitor is created
+      release: "kube-prometheus-stack"  # MUST match your Prometheus Operator release name
+      interval: "30s"         # Scrape interval
+      scrapeTimeout: "10s"    # Scrape timeout
+      additionalLabels: {}    # Additional labels for ServiceMonitor
 
   # ---------------------------------------------------------------------------
   # Environment Variables (Service Discovery)

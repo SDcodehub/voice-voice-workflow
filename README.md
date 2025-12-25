@@ -75,6 +75,7 @@ cd voice-client && uv run test_mic_client.py
 | [Deployment Guide](docs/guides/DEPLOYMENT.md) | Full K8s deployment instructions |
 | [Development Guide](docs/guides/DEVELOPMENT.md) | Local development setup |
 | [Client Setup](docs/guides/CLIENT_SETUP.md) | Mac/mobile client configuration |
+| [Observability Guide](docs/guides/OBSERVABILITY.md) | Prometheus, Grafana, GPU metrics |
 | [Configuration Reference](docs/reference/CONFIGURATION.md) | All config options |
 | [Security Guide](docs/reference/SECURITY.md) | Security features & best practices |
 | [Roadmap](docs/ROADMAP.md) | Project phases & future plans |

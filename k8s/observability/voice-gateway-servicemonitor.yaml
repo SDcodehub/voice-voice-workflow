@@ -1,0 +1,37 @@
+# ServiceMonitor for Voice Gateway
+# Apply this if NOT using Helm, or to manually create the ServiceMonitor
+#
+# Usage:
+#   kubectl apply -f k8s/observability/voice-gateway-servicemonitor.yaml
+#
+# Prerequisites:
+#   - kube-prometheus-stack deployed in 'prometheus' namespace
+#   - Voice Gateway deployed in 'voice-workflow' namespace
+#
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: voice-gateway-monitor
+  namespace: prometheus
+  labels:
+    # CRITICAL: This label MUST match Prometheus Operator's serviceMonitorSelector
+    release: kube-prometheus-stack
+    app: voice-gateway
+spec:
+  # Select services with these labels in voice-workflow namespace
+  selector:
+    matchLabels:
+      app: voice-gateway
+  
+  # Look in voice-workflow namespace
+  namespaceSelector:
+    matchNames:
+      - voice-workflow
+  
+  # Scrape configuration
+  endpoints:
+    - port: metrics           # Must match service port name
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+

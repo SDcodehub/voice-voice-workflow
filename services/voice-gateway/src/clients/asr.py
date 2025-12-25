@@ -4,6 +4,8 @@ from typing import AsyncGenerator
 import asyncio
 import queue
 
+from metrics import METRICS, Timer
+
 logger = logging.getLogger(__name__)
 
 class ASRClient:
@@ -32,19 +34,31 @@ class ASRClient:
         """
         Consumes an audio generator and yields transcript results.
         Uses a thread-safe queue to bridge asyncio generator and Riva's blocking iterator.
+        
+        Metrics collected:
+        - asr_latency: Time from first audio chunk to final transcript
         """
         # Create a queue to buffer audio chunks for the Riva client
         audio_queue = queue.Queue()
         
         # Flag to signal the end of the stream
         stream_closed = False
+        
+        # Timer for ASR latency (start on first audio, stop on final transcript)
+        asr_timer = Timer()
+        first_audio_received = False
 
         def audio_chunk_iterator():
+            nonlocal first_audio_received
             while True:
                 try:
                     chunk = audio_queue.get(timeout=1.0) # Wait for audio
                     if chunk is None: # Sentinel for end of stream
                         return
+                    # Start timer on first audio chunk
+                    if not first_audio_received:
+                        asr_timer.start()
+                        first_audio_received = True
                     yield chunk
                 except queue.Empty:
                     if stream_closed:
@@ -102,6 +116,8 @@ class ASRClient:
                                 )
                 except Exception as e:
                     logger.error(f"Error in Riva consumption: {e}")
+                    # Record error metric
+                    METRICS.asr_errors.labels(error_type=type(e).__name__).inc()
                 finally:
                     asyncio.run_coroutine_threadsafe(result_queue.put(None), loop)
 
@@ -114,6 +130,13 @@ class ASRClient:
                 if item is None:
                     break
                 transcript, is_final = item
+                
+                # Record ASR latency on final transcript
+                if is_final and first_audio_received:
+                    asr_timer.stop()
+                    METRICS.asr_latency.labels(language=self.language_code).observe(asr_timer.duration)
+                    logger.debug(f"ASR latency: {asr_timer.duration:.3f}s")
+                
                 yield transcript, is_final
             
             # Wait for the consumer to finish cleanly
@@ -121,6 +144,7 @@ class ASRClient:
 
         except Exception as e:
             logger.error(f"Error during transcription: {e}")
+            METRICS.asr_errors.labels(error_type=type(e).__name__).inc()
             raise e
         finally:
             # ensure background task is cleaned up

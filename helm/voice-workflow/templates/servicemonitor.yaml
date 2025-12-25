@@ -1,0 +1,31 @@
+{{- if .Values.gateway.metrics.serviceMonitor.enabled }}
+# ServiceMonitor for Prometheus Operator (kube-prometheus-stack)
+# The 'release: kube-prometheus-stack' label is REQUIRED for Prometheus to discover this target
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Release.Name }}-gateway
+  namespace: {{ .Values.gateway.metrics.serviceMonitor.namespace | default "prometheus" }}
+  labels:
+    app: voice-gateway
+    app.kubernetes.io/name: voice-gateway
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    # CRITICAL: This label must match Prometheus Operator's serviceMonitorSelector
+    release: {{ .Values.gateway.metrics.serviceMonitor.release | default "kube-prometheus-stack" }}
+    {{- with .Values.gateway.metrics.serviceMonitor.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app: voice-gateway
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.gateway.metrics.serviceMonitor.interval | default "30s" }}
+      scrapeTimeout: {{ .Values.gateway.metrics.serviceMonitor.scrapeTimeout | default "10s" }}
+{{- end }}
+

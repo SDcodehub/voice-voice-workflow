@@ -172,6 +172,66 @@ kubectl get pdb -n voice-workflow
 kubectl scale deployment/voice-gateway-gateway --replicas=2 -n voice-workflow
 ```
 
+## Optional: Deploy Observability Stack
+
+If you don't have Prometheus and Grafana, deploy kube-prometheus-stack:
+
+### Install kube-prometheus-stack
+
+```bash
+# Add Helm repo
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+
+# Create namespace
+kubectl create namespace prometheus
+
+# Install with GPU monitoring enabled
+helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+  -n prometheus \
+  --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
+  --set grafana.adminPassword=prom-operator
+```
+
+### Create DCGM ServiceMonitor (for GPU metrics)
+
+```bash
+cat <<EOF | kubectl apply -f -
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: dcgm-exporter
+  namespace: gpu-operator
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app: nvidia-dcgm-exporter
+  namespaceSelector:
+    matchNames:
+      - gpu-operator
+  endpoints:
+    - port: gpu-metrics
+      path: /metrics
+EOF
+```
+
+### Verify Installation
+
+```bash
+# Check pods
+kubectl get pods -n prometheus
+
+# Expected:
+# kube-prometheus-stack-grafana-xxx              3/3     Running
+# prometheus-kube-prometheus-stack-prometheus-0  2/2     Running
+```
+
+See [Observability Guide](OBSERVABILITY.md) for dashboard setup and metrics details.
+
+---
+
 ## Useful Commands
 
 ```bash
@@ -190,4 +250,3 @@ kubectl rollout restart deployment/voice-gateway-gateway -n voice-workflow
 # Scale gateway
 kubectl scale deployment/voice-gateway-gateway --replicas=2 -n voice-workflow
 ```
-

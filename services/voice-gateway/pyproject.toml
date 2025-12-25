@@ -1,7 +1,7 @@
 [project]
 name = "voice-gateway"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.2.0"
+description = "Voice-to-Voice AI Gateway with gRPC streaming"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -13,4 +13,5 @@ dependencies = [
     "openai>=2.14.0",
     "protobuf>=6.33.2",
     "python-dotenv>=1.2.1",
+    "prometheus-client>=0.21.0",
 ]
