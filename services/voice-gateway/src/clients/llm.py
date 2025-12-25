@@ -44,7 +44,7 @@ class LLMClient:
             
         Yields:
             str: Chunks of generated text
-            
+        
         Metrics collected:
         - llm_ttft: Time to first token
         - llm_total: Total generation time
@@ -58,7 +58,7 @@ class LLMClient:
             messages.append({"role": "system", "content": effective_prompt})
         
         messages.append({"role": "user", "content": text_input})
-        
+
         # Timers for latency metrics
         total_timer = Timer()
         ttft_timer = Timer()
